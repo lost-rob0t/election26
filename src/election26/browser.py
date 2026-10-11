@@ -91,7 +91,7 @@ def runtime_command(runtime, limits):
     if version.returncode != 0 or release < (0, 12):
         raise PolicyError('Secure browser capture requires bubblewrap 0.12 or later')
     command = [bwrap, '--unshare-user', '--unshare-net', '--unshare-pid',
-               '--unshare-ipc', '--unshare-uts', '--die-with-parent', '--cap-drop', 'ALL',
+               '--unshare-ipc', '--unshare-uts', '--unshare-cgroup', '--die-with-parent', '--cap-drop', 'ALL',
                '--ro-bind', str(root), '/', '--proc', '/proc', '--dev', '/dev',
                '--size', str(limits.tmp_bytes), '--tmpfs', '/tmp',
                '--size', str(32 * 1024 * 1024), '--tmpfs', '/dev/shm',

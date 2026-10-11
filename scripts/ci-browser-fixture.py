@@ -20,6 +20,7 @@ from unittest.mock import patch
 
 from election26.archive import Archive, gc_plan, status
 from election26.browser import BrowserLimits, capture_browser, runtime_command
+from election26.browser_resources import envelope
 from election26.config import Config
 from election26.network import Response
 
@@ -88,6 +89,52 @@ class SyntheticHTTP:
         yield Response(Raw(body, mime), None, url)
 
 
+# Exercise the strongest unprivileged remount route available to a compromised
+# browser process. No host mount or resource setting is changed by this probe.
+CGROUP_PROBE = r'''
+import ctypes, errno, json, os
+from pathlib import Path
+libc = ctypes.CDLL(None, use_errno=True)
+libc.unshare.argtypes = [ctypes.c_int]
+libc.unshare.restype = ctypes.c_int
+libc.mount.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p]
+libc.mount.restype = ctypes.c_int
+def checked(result):
+ if result != 0:
+  code = ctypes.get_errno()
+  raise OSError(code, os.strerror(code))
+assert Path('/proc/self/cgroup').read_text().strip() == '0::/'
+outer = os.readlink('/proc/self/ns/cgroup')
+uid, gid = os.getuid(), os.getgid()
+checked(libc.unshare(0x10000000))  # CLONE_NEWUSER, then map this ordinary user.
+Path('/proc/self/uid_map').write_text('0 %d 1' % uid)
+Path('/proc/self/setgroups').write_text('deny')
+Path('/proc/self/gid_map').write_text('0 %d 1' % gid)
+checked(libc.unshare(0x00020000 | 0x02000000))  # NEWNS | NEWCGROUP
+assert os.readlink('/proc/self/ns/cgroup') != outer
+assert Path('/proc/self/cgroup').read_text().strip() == '0::/'
+mount = Path('/tmp/nested-cgroup'); mount.mkdir()
+checked(libc.mount(b'cgroup2', bytes(mount), b'cgroup2', 2 | 4 | 8, None))
+# Omitting nsdelegate here cannot turn off the system-wide option from a child
+# namespace. The ancestor is outside this mount and cannot be a migration target.
+assert not (mount/'..'/'cgroup.procs').exists()
+denied = {}
+for name in ['memory.max', 'memory.swap.max', 'pids.max']:
+ file = mount/name
+ value = file.read_text().strip()
+ try:
+  file.write_text(value)
+ except OSError as exc:
+  assert exc.errno in (errno.EPERM, errno.EACCES), (name, exc.errno)
+  denied[name] = exc.errno
+ else:
+  raise AssertionError('Namespace root controller was writable: ' + name)
+ assert file.read_text().strip() == value
+print(json.dumps({'nested_cgroup_remount': True, 'root_cap_writes_denied': denied,
+                  'outside_cgroup_paths_absent': True}), flush=True)
+'''
+
+
 def main(runtime):
     limits = BrowserLimits(seconds=30)
     command, spec = runtime_command(runtime, limits)
@@ -104,6 +151,8 @@ import os, sys, json
 sys.path.insert(0, '/app/vendor')
 from playwright.sync_api import sync_playwright
 assert os.readlink('/proc/self/ns/net') != {os.readlink('/proc/self/ns/net')!r}
+assert os.readlink('/proc/self/ns/cgroup') != {os.readlink('/proc/self/ns/cgroup')!r}
+assert open('/proc/self/cgroup').read().strip() == '0::/'
 assert not os.path.exists({str(secret)!r})
 assert 'ELECTION26_HOST_ONLY' not in os.environ
 assert not os.path.exists('/sys/fs/cgroup'), 'renderer must not migrate cgroups'
@@ -160,6 +209,12 @@ print(json.dumps({{'outside_sentinel_unreachable': True, 'host_files_hidden': Tr
             else:
                 raise AssertionError('Host sentinel was reached')
             print(proc.stdout)
+        before_caps = envelope()
+        nested = subprocess.run(command[:-1] + ['-c', CGROUP_PROBE], capture_output=True, text=True, timeout=15,
+                                env={'PATH': os.environ['PATH']})
+        assert nested.returncode == 0, nested.stderr[-2000:]
+        assert envelope() == before_caps
+        print(nested.stdout)
         # Exercise the kernel pids controller, not a mocked process-count check.
         task_probe = '''
 import os, signal, json, errno

@@ -4,9 +4,10 @@
 crawl, login, click, submission, or authenticated-account session. Raw HTTP
 acquisition remains available on Termux; this browser backend is **unsupported
 on native Android/Termux, PRoot, macOS and Windows**. It requires a non-root Linux
-host with working unprivileged user, network, PID, IPC and mount namespaces,
+host with working unprivileged user, network, PID, IPC, cgroup and mount namespaces,
 bubblewrap 0.12+, sandboxed Chromium, and an enforced cgroup-v2 envelope
-with at most 1 GiB memory, no swap and 256 tasks across the process tree. Unsupported hosts fail closed.
+with at most 1 GiB memory, no swap and 256 tasks across the process tree.
+The existing cgroup2 mount must have `nsdelegate`; the tool never enables it. Unsupported hosts fail closed.
 
 ## Local setup and use
 
@@ -37,7 +38,9 @@ The runtime is public program data, not an archive or arbitrary filesystem root.
 The Python dependency is pinned to Playwright 1.62.0; Chromium comes from that
 release's official installer. The runtime does not require GitHub or CI. CI
 installs the same dependencies and runs synthetic fixtures as validation only.
-The mandatory real-browser fixture can also be run locally:
+The mandatory real-browser fixture can also be run locally (on systemd 253+,
+`-p OOMPolicy=continue` can keep the scope supervisor alive during its intentional
+renderer OOM; the memory ceiling remains enforced):
 
 ```sh
 systemd-run --user --scope -p MemoryMax=1G -p MemorySwapMax=0 -p TasksMax=256 \
@@ -70,7 +73,11 @@ mounts hold temporary browser state. The PID namespace and process-group
 supervisor terminate Chromium and the broker on deadline, including blocked DNS.
 The kernel cgroup-v2 memory/swap/tasks limits are verified before acquisition and
 again in the broker; an absent or unbounded envelope fails closed. The renderer
-cannot access cgroupfs to migrate. V8 heap flags and RSS polling are not treated
+has no mounted cgroupfs and runs in a strict cgroup namespace. The existing
+`nsdelegate` kernel boundary prevents raising the namespace-root controller
+limits or migrating outside it, even if a compromised process creates nested
+user/cgroup namespaces and remounts cgroup2. Missing `nsdelegate` fails closed;
+never remount the host hierarchy to bypass this preflight. V8 heap flags and RSS polling are not treated
 as memory enforcement. If an OOM kills the whole CLI, a running session is only
 the last committed state, never proof that it is still alive or complete.
 A separate lifecycle lock spans session publication and worker ownership; the
@@ -135,7 +142,10 @@ The hosted Linux gate requires actual Chromium JavaScript mutation + JSON fetch,
 unchanged originals, derived relationships, and preservation after oversized DOM.
 A separate real browser deliberately runs without request interception and must
 fail to reach a TCP sentinel outside its network namespace. It also checks the
-absence of a host file/environment value and Chromium sandbox evidence. It
+absence of a host file/environment value and Chromium sandbox evidence. A
+nested user/mount/cgroup namespace actually remounts cgroup2 and must receive
+EPERM/EACCES for same-value root controller writes; ancestor paths are absent
+and the trusted parent rechecks unchanged effective limits. It
 also exhausts the kernel tasks limit and triggers a real ArrayBuffer OOM under
 the cgroup memory ceiling, requiring preserved originals and a partial result. There is
 no production localhost-admission option.

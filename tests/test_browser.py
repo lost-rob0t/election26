@@ -200,14 +200,15 @@ class IPCAndIsolationTests(unittest.TestCase):
                 p = root/path; p.parent.mkdir(exist_ok=True); p.touch()
             (root/'runtime.json').write_text(json.dumps({'format_version': 1, 'python': '/runtime/python',
                 'python_home': '/runtime', 'chromium': '/runtime/chromium', 'public_runtime_only': True}))
-            with patch.dict(os.environ, {}, clear=True), patch('os.geteuid', return_value=1000), patch('election26.browser.envelope', return_value={}), patch('shutil.which', return_value='/usr/bin/bwrap'), patch('subprocess.run') as proc:
+            with patch('election26.browser.sys.platform', 'linux'), patch.dict(os.environ, {}, clear=True), patch('os.geteuid', return_value=1000), patch('election26.browser.envelope', return_value={}), patch('shutil.which', return_value='/usr/bin/bwrap'), patch('subprocess.run') as proc:
                 proc.return_value.returncode = 0
                 proc.return_value.stdout = 'bubblewrap 0.12.0'
                 cmd, _ = runtime_command(tmp, BrowserLimits())
-            for option in ['--unshare-net', '--unshare-user', '--unshare-pid', '--clearenv', '--die-with-parent']:
+            for option in ['--unshare-net', '--unshare-user', '--unshare-pid', '--unshare-cgroup', '--clearenv', '--die-with-parent']:
                 self.assertIn(option, cmd)
             self.assertNotIn('--share-net', cmd)
             self.assertNotIn('--unshare-user-try', cmd)
+            self.assertNotIn('--unshare-cgroup-try', cmd)
             self.assertNotIn('--no-sandbox', cmd)
             self.assertEqual(cmd.count('--ro-bind'), 1)
             self.assertEqual(cmd[cmd.index('--ro-bind')+1:cmd.index('--ro-bind')+3], [tmp, '/'])
@@ -222,7 +223,7 @@ class ResourceEnvelopeTests(unittest.TestCase):
         from election26.browser_resources import envelope
         self.envelope = envelope
         self.files = {
-            '/proc/self/mountinfo': '1 0 0:1 / /sys/fs/cgroup rw - cgroup2 cgroup rw',
+            '/proc/self/mountinfo': '1 0 0:1 / /sys/fs/cgroup rw - cgroup2 cgroup rw,nsdelegate',
             '/proc/self/cgroup': '0::/scope/leaf\n',
             '/sys/fs/cgroup/scope/leaf/cgroup.procs': str(os.getpid()),
             '/sys/fs/cgroup/scope/leaf/memory.max': 'max',
@@ -245,11 +246,19 @@ class ResourceEnvelopeTests(unittest.TestCase):
         self.files['/sys/fs/cgroup/scope/leaf/cgroup.procs'] = '99999999'
         self.assertRaises(PolicyError, self.envelope)
 
+    def test_missing_or_non_superblock_nsdelegate_fails_closed(self):
+        for mount in ['1 0 0:1 / /sys/fs/cgroup rw - cgroup2 cgroup rw',
+                      '1 0 0:1 / /sys/fs/cgroup rw,nsdelegate - cgroup2 cgroup rw',
+                      '1 0 0:1 / /sys/fs/cgroup rw - cgroup2 cgroup rw,notnsdelegate',
+                      '1 0 0:1 / /sys/fs/cgroup rw - cgroup2 ']:
+            self.files['/proc/self/mountinfo'] = mount
+            self.assertRaises(PolicyError, self.envelope)
+
     def test_missing_unbounded_and_unmapped_envelopes_fail_closed(self):
         for key, value in [('/sys/fs/cgroup/scope/memory.max', 'max'),
                            ('/sys/fs/cgroup/scope/memory.swap.max', '1'),
                            ('/sys/fs/cgroup/scope/pids.max', '257'),
-                           ('/proc/self/mountinfo', '1 0 0:1 /container /sys/fs/cgroup rw - cgroup2 cgroup rw')]:
+                           ('/proc/self/mountinfo', '1 0 0:1 /container /sys/fs/cgroup rw - cgroup2 cgroup rw,nsdelegate')]:
             old = self.files[key]; self.files[key] = value
             self.assertRaises(PolicyError, self.envelope)
             self.files[key] = old
