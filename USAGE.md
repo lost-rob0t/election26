@@ -5,6 +5,10 @@ manifests, transcripts, credentials, and all generated data on private local
 storage outside Git.** No live collection, API call, or Discord post runs on
 installation, import, or CI. The repository owner's original README is preserved.
 
+For reproducible Linux x86_64 packages, optional tool profiles and an offline
+verification workflow, see [the Nix guide](docs/NIX.md). Runtime configuration
+and data for that path must stay outside both the checkout and the Nix store.
+
 For Android installation, see [the Termux guide](docs/TERMUX.md). All runtime
 commands work locally without GitHub or CI. For continuous collection, see
 [the cron deployment guide](docs/CRON.md).
