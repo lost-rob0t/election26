@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import sys
 import tempfile
 import time
 import unittest
@@ -199,7 +200,7 @@ class IPCAndIsolationTests(unittest.TestCase):
                 p = root/path; p.parent.mkdir(exist_ok=True); p.touch()
             (root/'runtime.json').write_text(json.dumps({'format_version': 1, 'python': '/runtime/python',
                 'python_home': '/runtime', 'chromium': '/runtime/chromium', 'public_runtime_only': True}))
-            with patch('os.geteuid', return_value=1000), patch('shutil.which', return_value='/usr/bin/bwrap'), patch('subprocess.run') as proc:
+            with patch('os.geteuid', return_value=1000), patch('election26.browser.envelope', return_value={}), patch('shutil.which', return_value='/usr/bin/bwrap'), patch('subprocess.run') as proc:
                 proc.return_value.returncode = 0
                 proc.return_value.stdout = 'bubblewrap 0.12.0'
                 cmd, _ = runtime_command(tmp, BrowserLimits())
@@ -215,3 +216,128 @@ class IPCAndIsolationTests(unittest.TestCase):
         for value in [0, -1, True, float('inf'), 121]:
             with self.assertRaises(PolicyError):
                 BrowserLimits(seconds=value)
+
+class ResourceEnvelopeTests(unittest.TestCase):
+    def setUp(self):
+        from election26.browser_resources import envelope
+        self.envelope = envelope
+        self.files = {
+            '/proc/self/mountinfo': '1 0 0:1 / /sys/fs/cgroup rw - cgroup2 cgroup rw',
+            '/proc/self/cgroup': '0::/scope/leaf\n',
+            '/sys/fs/cgroup/scope/leaf/cgroup.procs': str(os.getpid()),
+            '/sys/fs/cgroup/scope/leaf/memory.max': 'max',
+            '/sys/fs/cgroup/scope/leaf/memory.swap.max': 'max',
+            '/sys/fs/cgroup/scope/leaf/pids.max': 'max',
+            '/sys/fs/cgroup/scope/memory.max': '1073741824',
+            '/sys/fs/cgroup/scope/memory.swap.max': '0',
+            '/sys/fs/cgroup/scope/pids.max': '256',
+        }
+        self.stack = contextlib.ExitStack(); self.addCleanup(self.stack.close)
+        self.stack.enter_context(patch.object(Path, 'read_text', lambda path, *a, **kw: self.files[str(path)]))
+        self.stack.enter_context(patch.object(Path, 'exists', lambda path: str(path) in self.files))
+        self.stack.enter_context(patch.object(Path, 'is_dir', return_value=True))
+        self.stack.enter_context(patch.object(Path, 'is_symlink', return_value=False))
+
+    def test_effective_ancestor_limits_and_current_membership(self):
+        self.assertEqual(self.envelope(), {'memory.max': 1073741824, 'memory.swap.max': 0, 'pids.max': 256})
+        self.files['/sys/fs/cgroup/scope/leaf/pids.max'] = '128'
+        self.assertEqual(self.envelope()['pids.max'], 128)
+        self.files['/sys/fs/cgroup/scope/leaf/cgroup.procs'] = '99999999'
+        self.assertRaises(PolicyError, self.envelope)
+
+    def test_missing_unbounded_and_unmapped_envelopes_fail_closed(self):
+        for key, value in [('/sys/fs/cgroup/scope/memory.max', 'max'),
+                           ('/sys/fs/cgroup/scope/memory.swap.max', '1'),
+                           ('/sys/fs/cgroup/scope/pids.max', '257'),
+                           ('/proc/self/mountinfo', '1 0 0:1 /container /sys/fs/cgroup rw - cgroup2 cgroup rw')]:
+            old = self.files[key]; self.files[key] = value
+            self.assertRaises(PolicyError, self.envelope)
+            self.files[key] = old
+
+
+@unittest.skipUnless(sys.platform == 'linux', 'Linux broker lifecycle')
+class BrokerLifecycleTests(unittest.TestCase):
+    def test_supervisor_bounds_stalled_dns_and_preserves_original(self):
+        import textwrap
+        # Synthetic protocol process ONLY, not a browser bypass in production.
+        protocol = textwrap.dedent('''
+            import sys,json
+            json.loads(sys.stdin.readline())
+            print(json.dumps({'op':'ready'}),flush=True)
+            print(json.dumps({'op':'request','url':'https://fixture.example/index','method':'GET','type':'document','initial':True}),flush=True)
+            json.loads(sys.stdin.readline())
+            print(json.dumps({'op':'request','url':'https://fixture.example/slow','method':'GET','type':'fetch','initial':False}),flush=True)
+            json.loads(sys.stdin.readline())
+        ''')
+        class SlowDNS(FixtureClient):
+            @contextlib.contextmanager
+            def open(self, url):
+                if url.endswith('/slow'):
+                    time.sleep(30)
+                with super().open(url) as response:
+                    yield response
+        with tempfile.TemporaryDirectory() as tmp, patch('election26.archive.inside_git_checkout', return_value=False), \
+                patch('election26.browser.runtime_command', return_value=([sys.executable,'-u','-c',protocol], {'chromium':'fixture','resource_envelope':{}})), \
+                patch('election26.browser.envelope', return_value={}), \
+                patch('election26.browser.PublicHTTP', side_effect=lambda *a, **k: SlowDNS()):
+            config = Config(allowed_hosts=['fixture.example'], min_free_bytes=0, request_delay_seconds=0)
+            start = time.monotonic()
+            result = capture_browser(Path(tmp)/'archive', config, URL, '/unused-fixture', BrowserLimits(seconds=1))
+            self.assertLess(time.monotonic()-start, 7)
+            self.assertEqual(result['state'], 'partial')
+            self.assertEqual(result['reason'], 'process_deadline_or_crash')
+            self.assertEqual(result['requests'][-1]['state'], 'interrupted')
+            self.assertTrue(any(a['role'] == 'original_response' for a in result['artifacts']))
+
+    def test_parent_death_kills_blocked_broker(self):
+        import multiprocessing
+        import signal
+        from election26.browser import bind_parent_lifetime
+        receiver, sender = multiprocessing.get_context('fork').Pipe(duplex=False)
+        # Use a standalone supervisor process to avoid terminating the test runner.
+        def actual_supervisor():
+            parent_pid = os.getpid()
+            pid = os.fork()
+            if pid == 0:
+                bind_parent_lifetime(parent_pid)
+                sender.send(os.getpid())
+                time.sleep(30)
+                os._exit(0)
+            time.sleep(30)
+        process = multiprocessing.get_context('fork').Process(target=actual_supervisor)
+        process.start(); sender.close()
+        try:
+            self.assertTrue(receiver.poll(3))
+            broker_pid = receiver.recv()
+            process.kill(); process.join(3)
+            deadline = time.monotonic()+3
+            while time.monotonic() < deadline:
+                path = Path('/proc')/str(broker_pid)/'stat'
+                if not path.exists() or path.read_text().split()[2] == 'Z':
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail('orphaned broker kept running after supervisor death')
+        finally:
+            receiver.close()
+            if process.is_alive():
+                process.kill(); process.join()
+
+    def test_repair_does_not_race_live_lifecycle_but_recovers_dead_owner(self):
+        import fcntl
+        with tempfile.TemporaryDirectory() as tmp, patch('election26.archive.inside_git_checkout', return_value=False):
+            root = Path(tmp)/'archive'
+            config = Config(min_free_bytes=0)
+            with Archive(root, config).writer() as archive:
+                session = catalog.start(archive, URL, {})
+                lock = open(root/'.browser.lock', 'a+')
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # Models the parent-start/worker-acquire gap while parent is alive.
+                catalog.repair(archive)
+                self.assertEqual(catalog.manifest(archive, session)['state'], 'running')
+                lock.close()
+                # No lifecycle owner now; repair can mark a crashed observation.
+                catalog.repair(archive)
+                recovered = catalog.manifest(archive, session)
+                self.assertEqual(recovered['state'], 'partial')
+                self.assertEqual(recovered['reason'], 'supervisor_interrupted')

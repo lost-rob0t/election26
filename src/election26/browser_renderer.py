@@ -30,6 +30,9 @@ def receive(limit):
 
 def main():
     os.umask(0o077)
+    # Prefer sacrificing the untrusted renderer over its transaction supervisor.
+    with open('/proc/self/oom_score_adj', 'w') as handle:
+        handle.write('1000')
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     resource.setrlimit(resource.RLIMIT_FSIZE, (64 * 1024 * 1024,) * 2)
     resource.setrlimit(resource.RLIMIT_NOFILE, (512, 512))

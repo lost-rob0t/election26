@@ -4,6 +4,8 @@ The parent supervises the entire process group, including blocked getaddrinfo.
 The browser never has an egress interface, host filesystem, or broker socket.
 """
 import base64
+import ctypes
+import fcntl
 from dataclasses import asdict, dataclass
 from html.parser import HTMLParser
 import json
@@ -23,6 +25,7 @@ from . import browser_catalog as catalog
 from .config import PolicyError, BudgetError
 from .media import url_kind
 from .network import PublicHTTP
+from .browser_resources import envelope
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,7 @@ class BrowserLimits:
 def runtime_command(runtime, limits):
     if sys.platform != 'linux' or 'ANDROID_ROOT' in os.environ or os.geteuid() == 0:
         raise PolicyError('Secure browser capture requires non-root Linux; Android/Termux and macOS are unsupported')
+    resources = envelope()
     root = Path(runtime).expanduser().resolve(strict=True)
     if not root.is_dir():
         raise PolicyError('Browser runtime must be a dedicated public runtime directory')
@@ -95,7 +99,7 @@ def runtime_command(runtime, limits):
                '--setenv', 'PATH', '/nonexistent', '--setenv', 'PYTHONHOME', spec['python_home'],
                '--setenv', 'PYTHONDONTWRITEBYTECODE', '1', '--setenv', 'LANG', 'C.UTF-8',
                '--chdir', '/tmp', spec['python'], '/app/renderer.py']
-    return command, spec
+    return command, dict(spec, resource_envelope=resources)
 
 
 class IPCReader:
@@ -283,8 +287,19 @@ class Broker:
                                    'embedded_json_rendered', self.limits)
 
 
-def _run(archive_root, config, url, limits, session_id, command, spec, ready, client_factory=None):
+def bind_parent_lifetime(expected_parent):
+    # Linux PR_SET_PDEATHSIG: parent exit kills a broker even in blocked DNS.
+    # Check the expected PID AFTER setting the signal to close the fork race.
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:
+        raise PolicyError('Cannot bind broker lifetime to its supervisor')
+    if os.getppid() != expected_parent:
+        os._exit(70)
+
+
+def _run(archive_root, config, url, limits, session_id, command, spec, ready, expected_parent, client_factory=None):
     # New process group is established before the parent is allowed to kill it.
+    bind_parent_lifetime(expected_parent)
     os.setsid()
     ready.send(True)
     ready.close()
@@ -292,6 +307,7 @@ def _run(archive_root, config, url, limits, session_id, command, spec, ready, cl
     renderer = None
     with Archive(archive_root, config).writer() as archive:
         try:
+            envelope()  # Verify the child inherited the same enforced envelope.
             broker = Broker(archive, session_id, url, limits, client_factory(config) if client_factory else None)
             renderer = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.DEVNULL, bufsize=0, close_fds=True,
@@ -336,11 +352,27 @@ def capture_browser(archive_root, config, url, runtime, limits=None):
     limits = limits or BrowserLimits()
     url = config.permit(url)
     command, spec = runtime_command(runtime, limits)
-    with Archive(archive_root, config).writer() as archive:
-        session_id = catalog.start(archive, url, asdict(limits))
+    lifecycle = None
+    try:
+        with Archive(archive_root, config).writer() as archive:
+            lifecycle = open(archive.root / '.browser.lock', 'a+')
+            try:
+                fcntl.flock(lifecycle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                from .config import BusyError
+                raise BusyError('Another browser capture owns the lifecycle') from exc
+            catalog.recover_interrupted(archive)
+            session_id = catalog.start(archive, url, dict(asdict(limits), enforced_resources=spec['resource_envelope']))
+        return _supervise(archive_root, config, url, limits, session_id, command, spec)
+    finally:
+        if lifecycle:
+            lifecycle.close()
+
+
+def _supervise(archive_root, config, url, limits, session_id, command, spec):
     context = multiprocessing.get_context('fork')
     receiver, sender = context.Pipe(duplex=False)
-    worker = context.Process(target=_run, args=(archive_root, config, url, limits, session_id, command, spec, sender))
+    worker = context.Process(target=_run, args=(archive_root, config, url, limits, session_id, command, spec, sender, os.getpid()))
     worker.start()
     sender.close()
     try:

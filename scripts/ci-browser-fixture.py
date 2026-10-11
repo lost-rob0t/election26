@@ -47,6 +47,21 @@ class Raw:
         pass
 
 
+class MemoryPressureHTTP:
+    def __init__(self, config, **kwargs):
+        pass
+    @contextlib.contextmanager
+    def open(self, url):
+        assert url == URL
+        body = b'<html><script>const hold=[]; while(true) {const a=new Uint8Array(16777216); a.fill(7); hold.push(a);}</script></html>'
+        yield Response(Raw(body, 'text/html'), None, url)
+
+
+def memory_events():
+    group = next(line[3:] for line in Path('/proc/self/cgroup').read_text().splitlines() if line.startswith('0::'))
+    return dict(line.split() for line in (Path('/sys/fs/cgroup')/group.lstrip('/')/'memory.events').read_text().splitlines())
+
+
 class SyntheticHTTP:
     def __init__(self, config, **kwargs):
         self.config = config
@@ -77,6 +92,7 @@ from playwright.sync_api import sync_playwright
 assert os.readlink('/proc/self/ns/net') != {os.readlink('/proc/self/ns/net')!r}
 assert not os.path.exists({str(secret)!r})
 assert 'ELECTION26_HOST_ONLY' not in os.environ
+assert not os.path.exists('/sys/fs/cgroup'), 'renderer must not migrate cgroups'
 with sync_playwright() as p:
  b = p.chromium.launch(executable_path={spec['chromium']!r}, headless=True, chromium_sandbox=True)
  page = b.new_page()
@@ -86,9 +102,13 @@ with sync_playwright() as p:
  except Exception:
   failed = True
  assert failed, 'browser escaped isolated network namespace'
+ page.close()
+ page = b.new_page()
  page.goto('chrome://sandbox')
  summary = page.locator('body').inner_text()
- assert 'Seccomp-BPF' in summary and 'Yes' in summary, 'Chromium sandbox evidence missing'
+ import re
+ assert re.search(r'Seccomp-BPF sandbox\\s+Yes', summary), 'Chromium seccomp sandbox evidence missing'
+ assert re.search(r'Namespace sandbox\\s+Yes', summary), 'Chromium namespace sandbox evidence missing'
  b.close()
 print(json.dumps({{'outside_sentinel_unreachable': True, 'host_files_hidden': True, 'host_env_hidden': True, 'chromium_sandbox': summary}}))
 '''
@@ -105,6 +125,35 @@ print(json.dumps({{'outside_sentinel_unreachable': True, 'host_files_hidden': Tr
             else:
                 raise AssertionError('Host sentinel was reached')
             print(proc.stdout)
+        # Exercise the kernel pids controller, not a mocked process-count check.
+        task_probe = '''
+import os, signal, json, errno
+children=[]
+limited=False
+try:
+ for _ in range(300):
+  try:
+   pid=os.fork()
+  except OSError as e:
+   assert e.errno == errno.EAGAIN
+   limited=True
+   break
+  if pid == 0:
+   signal.pause()
+   os._exit(0)
+  children.append(pid)
+ assert limited and len(children) < 256
+ print(json.dumps({'kernel_tasks_limit': True, 'children_before_denial': len(children)}), flush=True)
+finally:
+ for pid in children:
+  os.kill(pid, signal.SIGKILL)
+ for pid in children:
+  os.waitpid(pid, 0)
+'''
+        task_result = subprocess.run(command[:-1] + ['-c', task_probe], capture_output=True, text=True, timeout=15,
+                                     env={'PATH': os.environ['PATH']})
+        assert task_result.returncode == 0, task_result.stderr[-1000:]
+        print(task_result.stdout)
         with patch('election26.browser.PublicHTTP', SyntheticHTTP):
             result = capture_browser(root/'archive', config, URL, runtime, limits)
         assert result['state'] == 'complete', result
@@ -123,9 +172,17 @@ print(json.dumps({{'outside_sentinel_unreachable': True, 'host_files_hidden': Tr
         assert partial['state'] == 'partial'
         assert any(a['role'] == 'original_response' for a in partial['artifacts'])
         assert not any(a['role'] == 'rendered_dom' for a in partial['artifacts'])
+        # ArrayBuffer allocations are outside the V8 old-space heap cap. Prove
+        # the cgroup kills their renderer while committed originals survive.
+        before_oom = int(memory_events()['oom_kill'])
+        with patch('election26.browser.PublicHTTP', MemoryPressureHTTP):
+            pressured = capture_browser(root/'memory-pressure', config, URL, runtime, BrowserLimits(seconds=15))
+        assert pressured['state'] == 'partial'
+        assert any(a['role'] == 'original_response' for a in pressured['artifacts'])
+        assert int(memory_events()['oom_kill']) > before_oom, 'No kernel memory enforcement evidence'
         print(json.dumps({'secure_browser_fixture': 'passed', 'original_unchanged': True,
                           'javascript_and_json_rendered': True, 'derived_relationships': len(roles),
-                          'oversize_dom_retains_original': True}))
+                          'oversize_dom_retains_original': True, 'kernel_memory_limit': True, 'kernel_tasks_limit': True}))
 
 
 if __name__ == '__main__':

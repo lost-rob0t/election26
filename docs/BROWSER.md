@@ -5,7 +5,8 @@ crawl, login, click, submission, or authenticated-account session. Raw HTTP
 acquisition remains available on Termux; this browser backend is **unsupported
 on native Android/Termux, PRoot, macOS and Windows**. It requires a non-root Linux
 host with working unprivileged user, network, PID, IPC and mount namespaces,
-bubblewrap 0.12+, and sandboxed Chromium. Unsupported hosts fail closed.
+bubblewrap 0.12+, sandboxed Chromium, and an enforced cgroup-v2 envelope
+with at most 1 GiB memory, no swap and 256 tasks across the process tree. Unsupported hosts fail closed.
 
 ## Local setup and use
 
@@ -18,7 +19,8 @@ python -m pip install '.[browser]'
 python -m playwright install --with-deps chromium
 python scripts/build-browser-runtime.py "$HOME/.local/share/election26-browser-runtime"
 
-election26 --config config.local.json --archive "$HOME/.local/share/election26-archive" \
+systemd-run --user --scope -p MemoryMax=1G -p MemorySwapMax=0 -p TasksMax=256 \
+  election26 --config config.local.json --archive "$HOME/.local/share/election26-archive" \
   browser 'https://explicit-allowlisted.example/page' \
   --runtime "$HOME/.local/share/election26-browser-runtime"
 ```
@@ -38,7 +40,8 @@ installs the same dependencies and runs synthetic fixtures as validation only.
 The mandatory real-browser fixture can also be run locally:
 
 ```sh
-python scripts/ci-browser-fixture.py "$HOME/.local/share/election26-browser-runtime"
+systemd-run --user --scope -p MemoryMax=1G -p MemorySwapMax=0 -p TasksMax=256 \
+  python scripts/ci-browser-fixture.py "$HOME/.local/share/election26-browser-runtime"
 ```
 
 ## Security boundary and transport
@@ -65,6 +68,15 @@ mount is the dedicated public runtime. HOME, archive data, credentials,
 environment secrets and host sockets are absent; private size-limited tmpfs
 mounts hold temporary browser state. The PID namespace and process-group
 supervisor terminate Chromium and the broker on deadline, including blocked DNS.
+The kernel cgroup-v2 memory/swap/tasks limits are verified before acquisition and
+again in the broker; an absent or unbounded envelope fails closed. The renderer
+cannot access cgroupfs to migrate. V8 heap flags and RSS polling are not treated
+as memory enforcement. If an OOM kills the whole CLI, a running session is only
+the last committed state, never proof that it is still alive or complete.
+A separate lifecycle lock spans session publication and worker ownership; the
+next browser invocation or `repair` marks interrupted sessions partial only after
+obtaining this lock. The broker uses race-checked Linux parent-death SIGKILL, so
+parent termination also stops a broker stuck in DNS and releases its lock.
 Chromium's sandbox remains enabled. No weaker fallback exists.
 
 Service workers, other workers, child frames, extra navigations, popups,
@@ -119,7 +131,9 @@ The hosted Linux gate requires actual Chromium JavaScript mutation + JSON fetch,
 unchanged originals, derived relationships, and preservation after oversized DOM.
 A separate real browser deliberately runs without request interception and must
 fail to reach a TCP sentinel outside its network namespace. It also checks the
-absence of a host file/environment value and Chromium sandbox evidence. There is
+absence of a host file/environment value and Chromium sandbox evidence. It
+also exhausts the kernel tasks limit and triggers a real ArrayBuffer OOM under
+the cgroup memory ceiling, requiring preserved originals and a partial result. There is
 no production localhost-admission option.
 
 Unit tests cover denied/private/robots/redirect targets, fixed headers, links-first
@@ -137,3 +151,5 @@ Official implementation references:
 - https://github.com/containers/bubblewrap/releases/tag/v0.12.0
 - https://github.com/termux/termux-packages/blob/master/x11-packages/chromium/build.sh
 - https://github.com/termux/proot-distro
+
+Resource-control references: https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html and https://www.freedesktop.org/software/systemd/man/latest/systemd.resource-control.html

@@ -1,5 +1,6 @@
 """Operational browser evidence relationships, not canonical StarIntel records."""
 import json
+import fcntl
 
 from .archive import atomic_json, now, sha256_file
 from .config import PolicyError
@@ -129,7 +130,24 @@ def save_manifest(archive, session_id):
     return result
 
 
+def recover_interrupted(archive):
+    """Caller must own the lifecycle lock, not merely the SQLite writer lock."""
+    if not exists(archive.db):
+        return
+    for row in list(archive.db.execute("SELECT id FROM browser_sessions WHERE state='running'")):
+        finish(archive, row[0], 'partial', 'supervisor_interrupted')
+
+
 def repair(archive):
     if exists(archive.db):
+        # An active supervisor holds this through its parent/worker lock gap.
+        # A dead supervisor's broker is killed by PDEATHSIG, releasing its copy.
+        with open(archive.root / '.browser.lock', 'a+') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                pass
+            else:
+                recover_interrupted(archive)
         for row in archive.db.execute('SELECT id FROM browser_sessions'):
             save_manifest(archive, row[0])

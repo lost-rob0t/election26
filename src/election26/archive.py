@@ -101,7 +101,7 @@ class Archive(MediaCatalog):
         if self.db is not None:
             raise PolicyError("Archive writer is already active")
         durable_mkdir(self.root)
-        allowed_names = {".writer.lock", "catalog.sqlite", "catalog.sqlite-journal", "objects", "tmp", "transcripts", "manifests", "canonical", "backup.json"}
+        allowed_names = {".writer.lock", ".browser.lock", "catalog.sqlite", "catalog.sqlite-journal", "objects", "tmp", "transcripts", "manifests", "canonical", "backup.json"}
         if any(p.name not in allowed_names or p.is_symlink() for p in self.root.iterdir()):
             raise PolicyError("Archive directory contains unrecognized files or symlinks")
         if any(p.is_symlink() for p in self.root.rglob("*")):
