@@ -445,7 +445,7 @@ class Archive(MediaCatalog):
             raise PolicyError("Backup destination has insufficient free space")
         path.mkdir(mode=0o700)
         # Caller holds the writer lock, so blobs and catalog share a stable view.
-        with sqlite3.connect(path / "catalog.sqlite") as target:
+        with contextlib.closing(sqlite3.connect(path / "catalog.sqlite")) as target, target:
             self.db.backup(target)
         for name in ("objects", "manifests", "transcripts", "canonical"):
             shutil.copytree(self.root / name, path / name)
@@ -462,7 +462,7 @@ def status(root):
                 "transcripts": 0, "errors": 0, "queue": {}}
     if path.is_symlink():
         raise PolicyError("Archive catalog symlinks are not supported")
-    with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
+    with contextlib.closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db, db:
         db.execute("BEGIN")  # All counters come from the same committed snapshot.
         rows = db.execute("SELECT sha256, MAX(bytes) FROM captures GROUP BY sha256").fetchall()
         return {
