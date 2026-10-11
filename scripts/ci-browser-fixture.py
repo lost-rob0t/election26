@@ -105,10 +105,26 @@ with sync_playwright() as p:
  page.close()
  page = b.new_page()
  page.goto('chrome://sandbox')
+ page.wait_for_function("document.querySelectorAll('#sandbox-status tr').length > 0", timeout=3000)
  summary = page.locator('body').inner_text()
- import re
- assert re.search(r'Seccomp-BPF sandbox\\s+Yes', summary), 'Chromium seccomp sandbox evidence missing'
- assert re.search(r'Namespace sandbox\\s+Yes', summary), 'Chromium namespace sandbox evidence missing'
+ print(json.dumps({{'sandbox_diagnostics': summary}}), flush=True)
+ rows = dict(page.locator('#sandbox-status tr').evaluate_all('(rows) => rows.map(r => Array.from(r.cells, c => c.textContent))'))
+ assert rows.get('Seccomp-BPF sandbox') == 'Yes', 'Chromium seccomp sandbox evidence missing'
+ assert rows.get('Layer 1 Sandbox') == 'Namespace', 'Chromium namespace sandbox evidence missing'
+ from pathlib import Path
+ renderer_status=[]
+ for directory in Path('/proc').glob('[0-9]*'):
+  try:
+   if b'--type=renderer' not in (directory/'cmdline').read_bytes().split(b'\\0'):
+    continue
+   fields=dict(line.split(':',1) for line in (directory/'status').read_text().splitlines() if ':' in line)
+   assert fields.get('Seccomp','').strip() == '2'
+   assert fields.get('NoNewPrivs','').strip() == '1'
+   renderer_status.append({{'seccomp':2,'no_new_privs':1}})
+  except (FileNotFoundError, PermissionError):
+   continue
+ assert renderer_status, 'No actual sandboxed renderer kernel evidence'
+ print(json.dumps({{'renderer_kernel_status': renderer_status}}), flush=True)
  b.close()
 print(json.dumps({{'outside_sentinel_unreachable': True, 'host_files_hidden': True, 'host_env_hidden': True, 'chromium_sandbox': summary}}))
 '''
@@ -116,6 +132,7 @@ print(json.dumps({{'outside_sentinel_unreachable': True, 'host_files_hidden': Tr
                                   env={'PATH': os.environ['PATH'], 'ELECTION26_HOST_ONLY': 'fixture'})
             if proc.returncode:
                 # Only trusted runtime diagnostics, no acquired content or credentials.
+                print(proc.stdout[-3000:], file=sys.stderr)
                 print(proc.stderr[-3000:], file=sys.stderr)
                 raise AssertionError('Mandatory namespace/browser probe failed; no fallback permitted')
             try:

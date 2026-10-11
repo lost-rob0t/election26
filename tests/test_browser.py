@@ -200,7 +200,7 @@ class IPCAndIsolationTests(unittest.TestCase):
                 p = root/path; p.parent.mkdir(exist_ok=True); p.touch()
             (root/'runtime.json').write_text(json.dumps({'format_version': 1, 'python': '/runtime/python',
                 'python_home': '/runtime', 'chromium': '/runtime/chromium', 'public_runtime_only': True}))
-            with patch('os.geteuid', return_value=1000), patch('election26.browser.envelope', return_value={}), patch('shutil.which', return_value='/usr/bin/bwrap'), patch('subprocess.run') as proc:
+            with patch.dict(os.environ, {}, clear=True), patch('os.geteuid', return_value=1000), patch('election26.browser.envelope', return_value={}), patch('shutil.which', return_value='/usr/bin/bwrap'), patch('subprocess.run') as proc:
                 proc.return_value.returncode = 0
                 proc.return_value.stdout = 'bubblewrap 0.12.0'
                 cmd, _ = runtime_command(tmp, BrowserLimits())
@@ -255,7 +255,7 @@ class ResourceEnvelopeTests(unittest.TestCase):
             self.files[key] = old
 
 
-@unittest.skipUnless(sys.platform == 'linux', 'Linux broker lifecycle')
+@unittest.skipUnless(sys.platform == 'linux' and 'ANDROID_ROOT' not in os.environ, 'Native Linux browser lifecycle only')
 class BrokerLifecycleTests(unittest.TestCase):
     def test_supervisor_bounds_stalled_dns_and_preserves_original(self):
         import textwrap
