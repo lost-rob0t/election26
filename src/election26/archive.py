@@ -428,9 +428,16 @@ class Archive(MediaCatalog):
         return results
 
     def repair_manifests(self):
-        from .browser_catalog import repair
-        repair(self)
+        from .spool import present, repair
+        from .browser_catalog import repair as repair_browser
+        repair_browser(self)
+        has_imports = present(self.db)
         for row in self.db.execute("SELECT * FROM captures"):
+            if has_imports and self.db.execute(
+                    "SELECT 1 FROM spool_imports WHERE capture_id=?", (row["id"],)).fetchone():
+                # Never publish a generic intermediate that loses partial/error
+                # status or producer provenance, even if later repair is interrupted.
+                continue
             path = self.root / "manifests" / (str(row["id"]) + ".json")
             if not path.exists():
                 self.budget(len(json.dumps(dict(row)).encode("utf-8")) + 4096)
@@ -441,6 +448,7 @@ class Archive(MediaCatalog):
             if not path.exists():
                 self.budget(len(row["payload"].encode()) + 4096)
                 atomic_json(path, dict(json.loads(row["payload"]), id=row["id"]))
+        repair(self)
 
     def backup(self, path):
         path = Path(path).expanduser().resolve()
@@ -468,18 +476,25 @@ def status(root):
     if not path.exists():
         return {"initialized": False, "capture_observations": 0, "unique_objects": 0,
                 "original_bytes": 0, "stored_object_bytes": 0, "canonical_documents": 0,
-                "transcripts": 0, "errors": 0, "queue": {}}
+                "transcripts": 0, "errors": 0, "queue": {}, "imported_observations": 0,
+                "incomplete_imported_observations": 0, "import_metadata_bytes": 0}
     if path.is_symlink():
         raise PolicyError("Archive catalog symlinks are not supported")
     with contextlib.closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db, db:
         db.execute("BEGIN")  # All counters come from the same committed snapshot.
         rows = db.execute("SELECT sha256, MAX(bytes) FROM captures GROUP BY sha256").fetchall()
+        imported = {"imported_observations": 0, "incomplete_imported_observations": 0, "import_metadata_bytes": 0}
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='spool_imports'").fetchone():
+            count, incomplete, metadata = db.execute("SELECT COUNT(*),COALESCE(SUM(complete=0),0),COALESCE(SUM(receipt_bytes),0) FROM spool_imports").fetchone()
+            metadata += db.execute("SELECT COALESCE(SUM(identity_bytes),0) FROM spool_sources").fetchone()[0]
+            imported = {"imported_observations": count, "incomplete_imported_observations": incomplete, "import_metadata_bytes": metadata}
         browser = db.execute("SELECT 1 FROM sqlite_master WHERE name='browser_artifacts'").fetchone()
         all_objects = dict(rows)
         if browser:
             for digest, size in db.execute("SELECT sha256,MAX(bytes) FROM browser_artifacts GROUP BY sha256"):
                 all_objects[digest] = max(all_objects.get(digest, 0), size)
         return {
+            **imported,
             "browser_sessions": db.execute("SELECT COUNT(*) FROM browser_sessions").fetchone()[0] if browser else 0,
             "browser_artifacts": db.execute("SELECT COUNT(*) FROM browser_artifacts").fetchone()[0] if browser else 0,
             "initialized": True,
@@ -510,6 +525,10 @@ def gc_plan(archive):
                 and sha256_file(source) == row["sha256"]):
             candidates.append(row["sha256"])
     known = {r[0] for r in archive.db.execute("SELECT DISTINCT sha256 FROM captures")}
+    from .spool import present
+    if present(archive.db):
+        known.update(r[0] for r in archive.db.execute("SELECT receipt_sha256 FROM spool_imports"))
+        known.update(r[0] for r in archive.db.execute("SELECT identity_sha256 FROM spool_sources"))
     from .browser_catalog import exists
     if exists(archive.db):
         known.update(r[0] for r in archive.db.execute("SELECT DISTINCT sha256 FROM browser_artifacts"))
