@@ -1,0 +1,44 @@
+{
+  "country": "US",
+  "year": 2026,
+  "date_from": "2026-01-01",
+  "date_to": "2026-12-31",
+  "allowed_hosts": [
+    "www.govinfo.gov",
+    "news.ballotpedia.org",
+    "dccc.org",
+    "www.nrcc.org",
+    "lp.org",
+    "www.gp.org",
+    "www.fec.gov",
+    "columbus.legistar.com"
+  ],
+  "manual_urls": [
+    "https://www.fec.gov/updates/",
+    "https://www.fec.gov/resources/cms-content/documents/2026pdates.pdf",
+    "https://www.fec.gov/help-candidates-and-committees/dates-and-deadlines/",
+    "https://columbus.legistar.com/Calendar.aspx"
+  ],
+  "feeds": [
+    "https://www.govinfo.gov/rss/bills-bulkdata.xml",
+    "https://www.govinfo.gov/rss/billstatus-bulkdata.xml",
+    "https://news.ballotpedia.org/feed/",
+    "https://dccc.org/feed/",
+    "https://www.nrcc.org/feed/",
+    "https://lp.org/feed/",
+    "https://www.gp.org/press_releases.rss"
+  ],
+  "max_file_bytes": 16777216,
+  "max_archive_bytes": 2147483648,
+  "min_free_bytes": 1073741824,
+  "max_urls": 120,
+  "max_requests": 160,
+  "max_run_seconds": 300,
+  "request_delay_seconds": 1.0,
+  "user_agent": "election26/0.1 (bounded public-source archive)",
+  "brave_enabled": false,
+  "brave_credential": "env:BRAVE_SEARCH_API_KEY",
+  "discord_enabled": false,
+  "retention_days": 90,
+  "media_policies": {}
+}

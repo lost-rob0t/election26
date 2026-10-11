@@ -1,0 +1,85 @@
+[
+  {
+    "url": "https://www.sos.texas.gov/rss/press.xml",
+    "status": 200,
+    "final_url": "https://www.sos.texas.gov/rss/press.xml",
+    "content_type": "text/xml",
+    "root": "rss",
+    "items": 406,
+    "all_item_hosts": [
+      "gov.texas.gov",
+      "soswebdev",
+      "www.sos.state.tx.us",
+      "www.texaslyceum.org"
+    ],
+    "newest": "Thur 8, Oct 14:00 GMT",
+    "sample_item_url": "https://www.sos.state.tx.us/about/newsreleases/2026/100826.shtml",
+    "sample_article_status": 200,
+    "sample_article_final_url": "https://www.sos.state.tx.us/about/newsreleases/2026/100826.shtml",
+    "sample_article_type": "text/html"
+  },
+  {
+    "url": "https://feeds.npr.org/1014/rss.xml",
+    "status": 200,
+    "final_url": "https://feeds.npr.org/1014/rss.xml",
+    "content_type": "text/xml;charset=UTF-8",
+    "root": "rss",
+    "items": 10,
+    "all_item_hosts": [
+      "www.npr.org"
+    ],
+    "newest": "Sat, 10 Oct 2026 17:40:18 -0400",
+    "sample_item_url": "https://www.npr.org/2026/10/10/nx-s1-5992884/trumps-economic-strategy-resemble-similar-policies-in-east-asia",
+    "sample_article_status": 200,
+    "sample_article_final_url": "https://www.npr.org/2026/10/10/nx-s1-5992884/trumps-economic-strategy-resemble-similar-policies-in-east-asia",
+    "sample_article_type": "text/html; charset=UTF-8"
+  },
+  {
+    "url": "https://www.pbs.org/newshour/feeds/rss/politics",
+    "status": 200,
+    "final_url": "https://www.pbs.org/newshour/feeds/rss/politics",
+    "content_type": "application/rss+xml; charset=UTF-8",
+    "root": "rss",
+    "items": 20,
+    "all_item_hosts": [
+      "www.pbs.org"
+    ],
+    "newest": "Fri, 09 Oct 2026 18:50:33 -0400",
+    "sample_item_url": "https://www.pbs.org/newshour/show/ice-shooting-of-man-in-new-york-with-child-in-his-car-sparks-outrage",
+    "sample_article_status": 200,
+    "sample_article_final_url": "https://www.pbs.org/newshour/show/ice-shooting-of-man-in-new-york-with-child-in-his-car-sparks-outrage",
+    "sample_article_type": "text/html; charset=UTF-8"
+  },
+  {
+    "url": "https://www.votebeat.org/arc/outboundfeeds/rss/?outputType=xml",
+    "status": 200,
+    "final_url": "https://www.votebeat.org/arc/outboundfeeds/rss/?outputType=xml",
+    "content_type": "application/xml; charset=utf-8",
+    "root": "{http://www.w3.org/2005/Atom}feed",
+    "items": 100,
+    "all_item_hosts": [
+      "www.votebeat.org"
+    ],
+    "newest": "2026-10-09T20:42:44+00:00",
+    "sample_item_url": "https://www.votebeat.org/arizona/2026/10/09/2026-secretary-of-state-election-adrian-fontes-alex-kolodin/",
+    "sample_article_status": 200,
+    "sample_article_final_url": "https://www.votebeat.org/arizona/2026/10/09/2026-secretary-of-state-election-adrian-fontes-alex-kolodin/",
+    "sample_article_type": "text/html; charset=utf-8"
+  },
+  {
+    "url": "https://news.ballotpedia.org/tag/ballot-measures/feed/",
+    "status": 200,
+    "final_url": "https://news.ballotpedia.org/tag/ballot-measures/feed/",
+    "content_type": "application/rss+xml; charset=UTF-8",
+    "root": "rss",
+    "items": 20,
+    "all_item_hosts": [
+      "news.ballotpedia.org"
+    ],
+    "newest": "Wed, 07 Oct 2026 22:23:05 +0000",
+    "sample_item_url": "https://news.ballotpedia.org/2026/10/07/virginia-voters-will-decide-64-local-ballot-measures-on-election-day-more-the-last-three-novembers-combined/",
+    "sample_article_status": 200,
+    "sample_article_final_url": "https://news.ballotpedia.org/2026/10/07/virginia-voters-will-decide-64-local-ballot-measures-on-election-day-more-the-last-three-novembers-combined/",
+    "sample_article_type": "text/html; charset=UTF-8"
+  }
+]

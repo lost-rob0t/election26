@@ -15,6 +15,7 @@ transcripts/
 *.part
 *.sqlite*
 config.local.json
+archive-config.json
 
 canonical/
 manifests/
