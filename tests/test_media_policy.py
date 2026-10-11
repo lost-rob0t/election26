@@ -553,6 +553,45 @@ class MediaPolicyTests(unittest.TestCase):
             self.assertEqual(record["source_policy"], self.config.media_policies["news.example"])
             self.assertEqual((self.root / "manifests/media-1.json").read_bytes(), original)
 
+    def test_shared_capture_gate_recognizes_existing_opaque_media_reference(self):
+        url = "https://news.example/opaque"
+        with self.archive.writer() as archive:
+            self.seed(archive, url, kind_hint="audio")
+            archive.enqueue([url])
+            response = Response(url, "text/plain")
+            record = archive.capture(url, response)
+            self.assertEqual(record["state"], "not_requested")
+            self.assertEqual(response.reads, 0)
+            self.assertEqual(status(self.root)["capture_observations"], 0)
+            self.opt_in()
+            record = archive.capture(url, response)
+            self.assertEqual(record["state"], "not_requested")
+            self.assertEqual(response.reads, 0)
+
+    def test_rss_capture_keeps_known_media_semantics_even_when_response_is_xml(self):
+        url = "https://news.example/opaque"
+        self.config.feeds = [url]
+        with self.archive.writer() as archive:
+            self.seed(archive, url, kind_hint="audio")
+            response = Response(url, "application/rss+xml", b"<rss/>")
+            discover(archive, Client({url: response}), "rss")
+            self.assertEqual(response.reads, 0)
+            self.assertEqual(status(self.root)["capture_observations"], 0)
+            self.opt_in()
+            discover(archive, Client({url: response}), "rss")
+            self.assertEqual(response.reads, 0)
+            self.assertEqual(status(self.root)["capture_observations"], 0)
+
+    def test_redirect_to_known_opaque_media_cannot_become_text_capture(self):
+        url, final = "https://news.example/article", "https://cdn.example/opaque"
+        with self.archive.writer() as archive:
+            self.seed(archive, final, kind_hint="audio")
+            archive.enqueue([url])
+            response = Response(final, "text/plain")
+            self.assertEqual(archive.capture(url, response)["state"], "not_requested")
+            self.assertEqual(response.reads, 0)
+            self.assertEqual(status(self.root)["capture_observations"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

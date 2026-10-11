@@ -269,6 +269,9 @@ class Archive(MediaCatalog):
         url = self.config.permit(url)
         final_url = self.config.permit(response.url)
         source_url = source_url or (reference["source_url"] if reference else url)
+        if source_url:
+            source_url = self.config.permit(source_url)
+        reference = reference or self.known_media_reference(url, source_url, final_url)
         for name in ("content-type", "etag", "last-modified", "content-encoding", "content-length"):
             if len(response.headers.get(name, "").encode("utf-8")) > 1024:
                 raise PolicyError("Source metadata exceeds the per-field limit")
@@ -356,12 +359,9 @@ class Archive(MediaCatalog):
         pending = list(self.db.execute(query, params))
         for item in pending:
             url = item["url"]
-            reference = self.db.execute("SELECT * FROM media_references WHERE url=? AND source_url IS ? "
-                                        "ORDER BY id DESC LIMIT 1", (url, item["source_url"])).fetchone()
-            known_media = reference or self.db.execute("SELECT * FROM media_references WHERE url=? LIMIT 1", (url,)).fetchone()
-            if reference or known_media or url_kind(url) or item["via"] in {"html-media", "policy-media"}:
-                reference = reference or self.media_reference(url, item["source_url"],
-                    kind_hint=url_kind(url) or (known_media["kind_hint"] if known_media else None))
+            reference = self.known_media_reference(url, item["source_url"],
+                                                   force=item["via"] in {"html-media", "policy-media"})
+            if reference:
                 attempted_media.add(reference["id"])
                 policy, reason = self.reference_admission(reference)
                 if not policy:

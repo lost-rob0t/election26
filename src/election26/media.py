@@ -89,6 +89,18 @@ class MediaCatalog:
                 (url, source_url, parent_capture_id, now(), content_type, advertised_bytes, kind_hint))
         return self.db.execute("SELECT * FROM media_references WHERE id=?", (cursor.lastrowid,)).fetchone()
 
+    def known_media_reference(self, url, source_url, final_url=None, force=False):
+        """Every entry point retains known-media semantics, even for opaque URLs."""
+        reference = self.db.execute("SELECT * FROM media_references WHERE url=? AND source_url IS ? "
+                                    "ORDER BY id DESC LIMIT 1", (url, source_url)).fetchone()
+        known = reference or self.db.execute("SELECT * FROM media_references WHERE url IN (?,?) LIMIT 1",
+                                             (url, final_url or url)).fetchone()
+        hint = url_kind(url) or url_kind(final_url or url)
+        if reference or known or hint or force:
+            return reference or self.media_reference(url, source_url,
+                kind_hint=hint or (known["kind_hint"] if known else None))
+        return None
+
     def media_event(self, reference, state, reason=None, capture=None, response=None, transactional=False):
         import json
         from .archive import now, atomic_json
