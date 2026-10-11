@@ -16,6 +16,7 @@ expected = [line.split()[0] for line in (root/'SHA256SUMS').read_text().splitlin
 assert len(expected) == 1, 'Missing/ambiguous official release checksum'
 actual = hashlib.sha256((root/asset).read_bytes()).hexdigest()
 assert actual == expected[0], 'Official APK checksum mismatch'
+assert actual == '3550e61f4d9eb49b712fd1bd9519dc37085a4d8eb597c57a340f0a64859b7144', 'Pinned APK checksum mismatch'
 print('Official Termux APK SHA256:', actual)
 PY
 adb install "$work/$asset"
@@ -26,15 +27,19 @@ adb shell am start -n com.termux/.app.TermuxActivity
 ready=false
 for attempt in $(seq 1 120); do
   if adb logcat -d -v tag '*:I' | grep -Fx 'I/Termux:TermuxInstaller: Bootstrap packages installed successfully.' >/dev/null &&
-     adb shell run-as com.termux test -x /data/data/com.termux/files/usr/bin/bash &&
-     adb shell run-as com.termux test -d /data/data/com.termux/files/home; then
+     adb shell "run-as com.termux /system/bin/sh -c 'test -x /data/data/com.termux/files/usr/bin/bash && test -d /data/data/com.termux/files/home'"; then
     ready=true
     break
   fi
   sleep 2
 done
-$ready || { echo 'Termux did not confirm completed bootstrap within 240s'; exit 1; }
-adb shell run-as com.termux mkdir -p /data/data/com.termux/files/home/election26-ci
+if ! $ready; then
+  echo 'Termux did not confirm completed bootstrap within 240s'
+  adb logcat -d -v tag '*:I' | grep 'TermuxInstaller' || true
+  exit 1
+fi
+echo 'TERMUX_BOOTSTRAP_COMPLETED' 
+adb shell run-as com.termux /system/bin/mkdir -p /data/data/com.termux/files/home/election26-ci
 # Only committed public source enters the emulator, no Git credential/config files.
 git archive HEAD | adb shell -T run-as com.termux /system/bin/tar -xf - -C /data/data/com.termux/files/home/election26-ci
 adb shell -T run-as com.termux /system/bin/sh <<'ANDROID'

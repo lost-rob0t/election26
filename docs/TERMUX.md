@@ -29,7 +29,7 @@ The initial host allowlist is empty. Review disk/free-space budgets and configur
   --archive "$HOME/.local/share/election26/archive" status
 ```
 
-No GitHub account, CI service, central server, paid API, or canonical SDK is required at runtime. Raw capture runs before optional normalization. HTML/JSON keeps the source's embedded media links by default. Bulk media downloads are not part of phone setup; per-source type/size policy is a separate planned slice. Transcription never triggers an implicit download.
+No GitHub account, CI service, central server, paid API, or canonical SDK is required at runtime. Raw capture runs before optional normalization. HTML/JSON keeps the source's embedded media links by default, and RSS/Atom enclosures are not queued. Existing queued/manual/article URLs are not yet response-type-gated; review those inputs before a links-only run. Bulk media downloads are not part of phone setup; per-source type/size policy is a separate planned slice. Transcription never triggers an implicit download.
 
 ## Optional yt-dlp and scheduling
 
@@ -40,12 +40,12 @@ No GitHub account, CI service, central server, paid API, or canonical SDK is req
 ## What CI proves
 
 `.github/workflows/termux.yml` launches Android API 28 x86_64 on a GitHub-hosted Intel macOS emulator host. Tests execute **inside the Android Termux app**, not in a Linux container or on the macOS host. The job:
-1. Downloads the versioned official Termux GitHub debug APK (v0.118.3), verifies it against that release's SHA-256 manifest, and logs the hash.
+1. Downloads the versioned official Termux GitHub debug APK (v0.118.3), verifies it against the committed SHA-256 pin and that release's checksum manifest, and logs the hash.
 2. Uses `adb run-as` in the disposable debuggable emulator app, without enabling external-app access or touching a phone.
 3. Installs twice, verifies unchanged config and no default cron installation, then runs the fixture suite with Android SDK/ABI/Python evidence.
 4. Runs yt-dlp against one generated 0.1-second WAV file, with user config/plugins disabled, an explicit fixture-only file-URL opt-in, 30-second timeout and size bound, and verifies exact bytes.
 
-The APK checksum manifest is fetched from the same official versioned release; it is a download-integrity check, not an independent signing trust root. GitHub debug APKs use a public test signing key and are used here only for disposable CI. Use the official installation guidance for your real device, not this CI APK harness.
+The committed APK SHA-256 is `3550e61f4d9eb49b712fd1bd9519dc37085a4d8eb597c57a340f0a64859b7144`, first verified against the official versioned release manifest. Both checks must pass. This is download integrity and a reviewed pin, not an independent signing trust root. GitHub debug APKs use a public test signing key and are used here only for disposable CI. Use the official installation guidance for your real device, not this CI APK harness.
 
 Only a successful exact-head Android job is evidence of that tested configuration. Linux tests alone are not Android verification. Physical phones, ARM64, newer Android versions, background scheduling endurance, real site downloads and Whisper inference remain separate validation targets. CI makes no live source collection and deploys nothing to a user device.
 

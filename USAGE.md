@@ -39,9 +39,11 @@ election26 --archive "$ARCHIVE" status
 election26 --archive "$ARCHIVE" gc
 ```
 
-Default collection keeps media links embedded in the captured HTML/JSON, without
-following them. A separate per-source media policy and structured link manifest
-are planned. Do not use broad media extraction for a phone archive.
+Default HTML collection keeps embedded media links without following them.
+RSS/Atom enclosure references remain in the original feed and are not queued. A separate per-source media policy and structured link manifest
+are planned; ordinary article/manual URLs are not yet content-type-gated, and
+existing queued items remain pending. Review those inputs before a links-only
+run. Do not use broad media extraction for a phone archive.
 
 The explicit legacy `fetch --extract-media` flag queues direct media links in
 captured HTML. A subsequent
