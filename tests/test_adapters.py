@@ -57,7 +57,7 @@ class AdapterTests(unittest.TestCase):
         guard = patch("election26.archive.inside_git_checkout", return_value=False)
         guard.start()
         self.addCleanup(guard.stop)
-        self.temp = tempfile.TemporaryDirectory(dir="/tmp")
+        self.temp = tempfile.TemporaryDirectory(dir=tempfile.gettempdir())
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / "private"
         self.config = Config(allowed_hosts=["news.example"], min_free_bytes=0)

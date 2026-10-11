@@ -28,7 +28,7 @@ class CronTests(unittest.TestCase):
         self.assertRaises(ValueError, cron.block, "/bad%path", "/cfg", "/archive", "/log", "rss")
 
     def test_single_pass_and_overlap_exit_codes(self):
-        with tempfile.TemporaryDirectory(dir="/tmp") as tmp, patch("election26.archive.inside_git_checkout", return_value=False), patch("sys.stdout", new_callable=io.StringIO), patch("sys.stderr", new_callable=io.StringIO):
+        with tempfile.TemporaryDirectory(dir=tempfile.gettempdir()) as tmp, patch("election26.archive.inside_git_checkout", return_value=False), patch("sys.stdout", new_callable=io.StringIO), patch("sys.stderr", new_callable=io.StringIO):
             root = str(Path(tmp) / "archive")
             cfg = Path(tmp) / "config.json"
             cfg.write_text('{"min_free_bytes":0}')
@@ -63,7 +63,7 @@ class ProgressTests(unittest.TestCase):
                 response = Response()
                 response.url = url
                 return response
-        with tempfile.TemporaryDirectory(dir="/tmp") as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
+        with tempfile.TemporaryDirectory(dir=tempfile.gettempdir()) as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
             config = Config(allowed_hosts=["news.example"], min_free_bytes=0)
             with Archive(Path(tmp) / "archive", config).writer() as archive:
                 archive.enqueue(["https://news.example/a", "https://news.example/b"])
@@ -85,7 +85,7 @@ class ProgressTests(unittest.TestCase):
                 if url.endswith("/rss"):
                     return Response(b'<rss><item><link>https://news.example/story</link></item></rss>')
                 return Response(b"news fixture", url, "text/html")
-        with tempfile.TemporaryDirectory(dir="/tmp") as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
+        with tempfile.TemporaryDirectory(dir=tempfile.gettempdir()) as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
             config = Config(allowed_hosts=["news.example"], feeds=["https://news.example/rss"], min_free_bytes=0)
             with Archive(Path(tmp) / "archive", config).writer() as archive:
                 first = run_pass(archive, Client(), mode="rss")
@@ -103,7 +103,7 @@ class ProgressTests(unittest.TestCase):
                 if url.endswith("/broken"):
                     raise OSError("fixture failure")
                 return Response(b'<rss><item><link>https://news.example/story</link></item></rss>', url)
-        with tempfile.TemporaryDirectory(dir="/tmp") as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
+        with tempfile.TemporaryDirectory(dir=tempfile.gettempdir()) as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
             config = Config(allowed_hosts=["news.example"], feeds=["https://news.example/broken", "https://news.example/rss"], min_free_bytes=0)
             with Archive(Path(tmp) / "archive", config).writer() as archive:
                 self.assertEqual(discover(archive, Client(), "rss")["errors"], ["OSError"])
@@ -111,7 +111,7 @@ class ProgressTests(unittest.TestCase):
 
     def test_previously_queued_links_do_not_consume_discovery_limit(self):
         from election26.discovery import discover
-        with tempfile.TemporaryDirectory(dir="/tmp") as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
+        with tempfile.TemporaryDirectory(dir=tempfile.gettempdir()) as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
             config = Config(allowed_hosts=["news.example"], manual_urls=["https://news.example/old", "https://news.example/new"], min_free_bytes=0, max_urls=1)
             with Archive(Path(tmp) / "archive", config).writer() as archive:
                 archive.enqueue(["https://news.example/old"])
@@ -134,7 +134,7 @@ class ProgressTests(unittest.TestCase):
                 if url.endswith("/costly"):
                     raise BudgetError("redirects consumed fixture budget")
                 return Response(b'<rss><item><link>https://news.example/story</link></item></rss>', url)
-        with tempfile.TemporaryDirectory(dir="/tmp") as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
+        with tempfile.TemporaryDirectory(dir=tempfile.gettempdir()) as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
             config = Config(allowed_hosts=["news.example"], feeds=["https://news.example/costly", "https://news.example/rss"], min_free_bytes=0)
             with Archive(Path(tmp) / "archive", config).writer() as archive:
                 self.assertTrue(discover(archive, Client(), "rss")["deferred"])

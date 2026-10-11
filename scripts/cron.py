@@ -20,7 +20,7 @@ def block(executable, config, archive, log, mode):
     return "\n".join([
         START,
         "# Bounded jobs; existing checkpoints/dedup survive process exits.",
-        f"*/5 * * * * {base} run --mode {shlex.quote(mode)} --extract-media >>{logfile} 2>&1",
+        f"*/5 * * * * {base} run --mode {shlex.quote(mode)} >>{logfile} 2>&1",
         "# Uncomment only after Discord destination/secrets/permission are configured:",
         f"# */15 * * * * {base} stats --send >>{logfile} 2>&1",
         END,

@@ -1,0 +1,31 @@
+name: Android Termux fixture verification
+on:
+  push:
+    branches: [main, feat/termux-install-android-ci]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: termux-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  android-termux:
+    # Intel macOS provides native Hypervisor.Framework without changing host
+    # KVM permissions. The test process runs INSIDE Android, not on macOS.
+    runs-on: macos-15-intel
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Android 28 x86_64 with official Termux
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 28
+          target: default
+          arch: x86_64
+          disk-size: 4096M
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: bash scripts/ci-termux-host.sh
