@@ -15,5 +15,6 @@ python -c 'import sys, sysconfig; print("TERMUX_PYTHON", sys.executable, sys.ver
 python -m unittest discover -s tests -v
 python -m compileall -q src scripts
 python scripts/ci-media-fixture.py
+python scripts/ci-source-kit-fixture.py
 "$HOME/.local/bin/election26" --config "$config" --archive "$HOME/.local/share/election26/archive" status
 printf '%s\n' 'ANDROID_TERMUX_FIXTURES_PASSED: install twice, config retained, no cron, archive fixtures, offline yt-dlp'

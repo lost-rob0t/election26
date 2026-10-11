@@ -1,0 +1,119 @@
+{
+  "checked_at_utc": "2026-10-11T05:04:00Z",
+  "method": "Read-only urllib HTTP GET; RSS/XML parsed by ElementTree. Official feed URLs discovered on https://www.govinfo.gov/feeds. No live collector archive or Brave call executed.",
+  "feeds": [
+    {
+      "url": "https://www.govinfo.gov/rss/bills-bulkdata.xml",
+      "final_url": "https://www.govinfo.gov/rss/bills-bulkdata.xml",
+      "status": 200,
+      "content_type": "text/xml",
+      "bytes": 55802,
+      "root": "rss",
+      "version": "2.0",
+      "items": 100,
+      "item_hosts": [
+        "www.govinfo.gov"
+      ],
+      "first_pubDate": "Thu, 08 Oct 2026 13:15:00 +0000",
+      "sample_item": "https://www.govinfo.gov/bulkdata/BILLS/119/2/hr/BILLS-119hr10674ih.xml",
+      "sample_status": 200,
+      "sample_root": "bill"
+    },
+    {
+      "url": "https://www.govinfo.gov/rss/billstatus-bulkdata.xml",
+      "final_url": "https://www.govinfo.gov/rss/billstatus-bulkdata.xml",
+      "status": 200,
+      "content_type": "text/xml",
+      "bytes": 54006,
+      "root": "rss",
+      "version": "2.0",
+      "items": 100,
+      "item_hosts": [
+        "www.govinfo.gov"
+      ],
+      "first_pubDate": "Sat, 10 Oct 2026 08:35:00 +0000",
+      "sample_item": "https://www.govinfo.gov/bulkdata/BILLSTATUS/119/hr/BILLSTATUS-119hr9489.xml",
+      "sample_status": 200,
+      "sample_root": "billStatus"
+    }
+  ],
+  "manual_urls": [
+    {
+      "url": "https://www.fec.gov/updates/",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 47960
+    },
+    {
+      "url": "https://www.fec.gov/resources/cms-content/documents/2026pdates.pdf",
+      "status": 200,
+      "content_type": "application/pdf",
+      "bytes": 226820
+    },
+    {
+      "url": "https://www.fec.gov/help-candidates-and-committees/dates-and-deadlines/",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 34758
+    },
+    {
+      "url": "https://columbus.legistar.com/Calendar.aspx",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 194990,
+      "note": "RSS button disabled; this is a current-month HTML snapshot, not legislative document crawling"
+    }
+  ],
+  "robots": [
+    {
+      "host": "www.govinfo.gov",
+      "status": 200,
+      "can_fetch_bills_feed": true
+    },
+    {
+      "host": "www.fec.gov",
+      "status": 200,
+      "can_fetch_updates": true,
+      "crawl_delay_seconds": 10
+    },
+    {
+      "host": "columbus.legistar.com",
+      "status": 404,
+      "collector_behavior": "404 is accepted as no robots restrictions"
+    }
+  ],
+  "raw_http_gaps": [
+    {
+      "url": "https://www.legislature.ohio.gov/legislation/status-reports",
+      "status": 502
+    },
+    {
+      "url": "https://www.ohiosos.gov/elections",
+      "status": 403
+    },
+    {
+      "url": "https://www.eac.gov/voters/register-and-vote-in-your-state",
+      "status": 403
+    },
+    {
+      "url": "https://vote.franklincountyohio.gov/election-info/2026",
+      "status": 403
+    },
+    {
+      "url": "https://vote.franklincountyohio.gov/getmedia/4001b052-1b90-4f73-b030-2d981e6ec8fa/2026-General-Certified-Questions-and-Issues",
+      "status": 403
+    },
+    {
+      "url": "https://www.congress.gov/rss/house-floor-today.xml",
+      "status": 403
+    },
+    {
+      "url": "https://www.congress.gov/rss/senate-floor-today.xml",
+      "status": 403
+    },
+    {
+      "url": "https://www.congress.gov/rss/presented-to-president.xml",
+      "status": 403
+    }
+  ]
+}

@@ -1,0 +1,515 @@
+{
+  "checked_at_utc": "2026-10-11T05:02:00Z",
+  "method": "Python urllib public GET, parsed with xml.etree.ElementTree; sampled one article per main entry. No generic HTML crawl.",
+  "feeds": [
+    {
+      "id": "ballotpedia",
+      "url": "https://news.ballotpedia.org/feed/",
+      "final_url": "https://news.ballotpedia.org/feed/",
+      "status": 200,
+      "parse": "RSS XML",
+      "items": 20,
+      "newest_item_date": "2026-10-09",
+      "source_type": "nonpartisan secondary election reporting",
+      "item_hosts": [
+        "news.ballotpedia.org"
+      ],
+      "sample_article_url": "https://news.ballotpedia.org/2026/10/09/weekly-brew-october-9-2026/",
+      "sample_article_status": 200,
+      "sample_article_final_url": "https://news.ballotpedia.org/2026/10/09/weekly-brew-october-9-2026/",
+      "auth": "No key, login, or cookie supplied; direct public GET"
+    },
+    {
+      "id": "dccc",
+      "url": "https://dccc.org/feed/",
+      "final_url": "https://dccc.org/feed/",
+      "status": 200,
+      "parse": "RSS XML",
+      "items": 10,
+      "newest_item_date": "2026-10-10",
+      "source_type": "Democratic House campaign committee, partisan primary statements",
+      "item_hosts": [
+        "dccc.org"
+      ],
+      "sample_article_url": "https://dccc.org/new-dccc-launches-new-digital-ad-campaign-targeting-latino-voters-in-tx-35/",
+      "sample_article_status": 200,
+      "sample_article_final_url": "https://dccc.org/new-dccc-launches-new-digital-ad-campaign-targeting-latino-voters-in-tx-35/",
+      "auth": "No key, login, or cookie supplied; direct public GET"
+    },
+    {
+      "id": "nrcc",
+      "url": "https://www.nrcc.org/feed/",
+      "final_url": "https://www.nrcc.org/feed/",
+      "status": 200,
+      "parse": "RSS XML",
+      "items": 10,
+      "newest_item_date": "2026-10-10",
+      "source_type": "Republican House campaign committee, partisan primary statements",
+      "item_hosts": [
+        "www.nrcc.org"
+      ],
+      "sample_article_url": "https://www.nrcc.org/2026/10/10/self-serving-vicente-five-star-tastes-zero-shame/",
+      "sample_article_status": 200,
+      "sample_article_final_url": "https://www.nrcc.org/2026/10/10/self-serving-vicente-five-star-tastes-zero-shame/",
+      "auth": "No key, login, or cookie supplied; direct public GET"
+    },
+    {
+      "id": "libertarian",
+      "url": "https://lp.org/feed/",
+      "final_url": "https://lp.org/feed/",
+      "status": 200,
+      "parse": "RSS XML",
+      "items": 10,
+      "newest_item_date": "2026-10-05",
+      "source_type": "Libertarian Party, partisan primary statements",
+      "item_hosts": [
+        "lp.org"
+      ],
+      "sample_article_url": "https://lp.org/notice-of-special-lnc-monthly-meeting-october-11-2026-at-700pm-eastern/",
+      "sample_article_status": 200,
+      "sample_article_final_url": "https://lp.org/notice-of-special-lnc-monthly-meeting-october-11-2026-at-700pm-eastern/",
+      "auth": "No key, login, or cookie supplied; direct public GET"
+    },
+    {
+      "id": "green",
+      "url": "https://www.gp.org/press_releases.rss",
+      "final_url": "https://www.gp.org/press_releases.rss",
+      "status": 200,
+      "parse": "RSS XML",
+      "items": 20,
+      "newest_item_date": "2026-05-12",
+      "source_type": "Green Party, partisan primary statements; sparse/stale",
+      "item_hosts": [
+        "www.gp.org"
+      ],
+      "sample_article_url": "http://www.gp.org/gpus_2026_annual_national_meeting_in_chicago",
+      "sample_article_status": 200,
+      "sample_article_final_url": "https://www.gp.org/gpus_2026_annual_national_meeting_in_chicago",
+      "auth": "No key, login, or cookie supplied; direct public GET"
+    },
+    {
+      "id": "dnc",
+      "url": "https://democrats.org/feed/",
+      "final_url": "https://democrats.org/feed/",
+      "status": 200,
+      "parse": "RSS XML",
+      "items": 10,
+      "newest_item_date": "2026-10-10",
+      "source_type": "Democratic National Committee, partisan primary statements",
+      "item_hosts": [
+        "democrats.org"
+      ],
+      "sample_article_url": "https://democrats.org/with-24-days-until-the-midterms-trump-heads-to-tennessee-for-the-second-time-in-two-weeks-in-a-desperate-attempt-to-rally-his-base/",
+      "sample_article_status": 200,
+      "sample_article_final_url": "https://democrats.org/with-24-days-until-the-midterms-trump-heads-to-tennessee-for-the-second-time-in-two-weeks-in-a-desperate-attempt-to-rally-his-base/",
+      "auth": "No key, login, or cookie supplied; direct public GET"
+    },
+    {
+      "id": "nrsc",
+      "url": "https://www.nrsc.org/feed/",
+      "final_url": "https://www.nrsc.org/feed/",
+      "status": 200,
+      "parse": "RSS XML",
+      "items": 10,
+      "newest_item_date": "2026-10-09",
+      "source_type": "Republican Senate campaign committee, partisan primary statements",
+      "item_hosts": [
+        "www.nrsc.org"
+      ],
+      "sample_article_url": "https://www.nrsc.org/press-releases/wtas-susan-collins-is-ripping-troy-jackson-to-shreds-tonight-2026-10-09/",
+      "sample_article_status": 200,
+      "sample_article_final_url": "https://www.nrsc.org/press-releases/wtas-susan-collins-is-ripping-troy-jackson-to-shreds-tonight-2026-10-09/",
+      "auth": "No key, login, or cookie supplied; direct public GET"
+    },
+    {
+      "id": "working_families",
+      "url": "https://workingfamilies.org/feed/",
+      "final_url": "https://workingfamilies.org/feed/",
+      "status": 200,
+      "parse": "RSS XML",
+      "items": 10,
+      "newest_item_date": "2026-10-08",
+      "source_type": "Working Families Party, partisan primary statements",
+      "item_hosts": [
+        "workingfamilies.org"
+      ],
+      "sample_article_url": "https://workingfamilies.org/2026/10/joe-de-la-cruz-fighting-for-working-families-in-connecticut/",
+      "sample_article_status": 200,
+      "sample_article_final_url": "https://workingfamilies.org/2026/10/joe-de-la-cruz-fighting-for-working-families-in-connecticut/",
+      "auth": "No key, login, or cookie supplied; direct public GET"
+    },
+    {
+      "id": "eac",
+      "url": "https://www.eac.gov/rss.xml",
+      "final_url": "https://www.eac.gov/rss.xml",
+      "status": 200,
+      "parse": "RSS XML",
+      "items": 10,
+      "newest_item_date": "2026-10-08",
+      "source_type": "Federal institution, broad technical stream; not press only",
+      "item_hosts": [
+        "www.eac.gov"
+      ],
+      "sample_article_url": "https://www.eac.gov/voting-equipment/engineering-change-orders/hrt-01755",
+      "sample_article_status": 200,
+      "sample_article_final_url": "https://www.eac.gov/voting-equipment/engineering-change-orders/hrt-01755",
+      "auth": "No key, login, or cookie supplied; direct public GET"
+    },
+    {
+      "id": "ballotpedia_ballot_measures",
+      "url": "https://news.ballotpedia.org/tag/ballot-measures/feed/",
+      "final_url": "https://news.ballotpedia.org/tag/ballot-measures/feed/",
+      "status": 200,
+      "parse": "RSS XML",
+      "items": 20,
+      "newest_item_date": "2026-10-07",
+      "sample_article_status": 200,
+      "auth": "No key, login, or cookie supplied; direct public GET",
+      "content_type": "application/rss+xml; charset=UTF-8",
+      "root": "rss",
+      "all_item_hosts": [
+        "news.ballotpedia.org"
+      ],
+      "newest": "Wed, 07 Oct 2026 22:23:05 +0000",
+      "sample_item_url": "https://news.ballotpedia.org/2026/10/07/virginia-voters-will-decide-64-local-ballot-measures-on-election-day-more-the-last-three-novembers-combined/",
+      "sample_article_final_url": "https://news.ballotpedia.org/2026/10/07/virginia-voters-will-decide-64-local-ballot-measures-on-election-day-more-the-last-three-novembers-combined/",
+      "sample_article_type": "text/html; charset=UTF-8"
+    },
+    {
+      "id": "npr_politics",
+      "url": "https://feeds.npr.org/1014/rss.xml",
+      "final_url": "https://feeds.npr.org/1014/rss.xml",
+      "status": 200,
+      "parse": "RSS XML",
+      "items": 10,
+      "newest_item_date": "2026-10-10",
+      "sample_article_status": 200,
+      "auth": "No key, login, or cookie supplied; direct public GET",
+      "content_type": "text/xml;charset=UTF-8",
+      "root": "rss",
+      "all_item_hosts": [
+        "www.npr.org"
+      ],
+      "newest": "Sat, 10 Oct 2026 17:40:18 -0400",
+      "sample_item_url": "https://www.npr.org/2026/10/10/nx-s1-5992884/trumps-economic-strategy-resemble-similar-policies-in-east-asia",
+      "sample_article_final_url": "https://www.npr.org/2026/10/10/nx-s1-5992884/trumps-economic-strategy-resemble-similar-policies-in-east-asia",
+      "sample_article_type": "text/html; charset=UTF-8"
+    },
+    {
+      "id": "pbs_politics",
+      "url": "https://www.pbs.org/newshour/feeds/rss/politics",
+      "final_url": "https://www.pbs.org/newshour/feeds/rss/politics",
+      "status": 200,
+      "parse": "RSS XML",
+      "items": 20,
+      "newest_item_date": "2026-10-09",
+      "sample_article_status": 200,
+      "auth": "No key, login, or cookie supplied; direct public GET",
+      "content_type": "application/rss+xml; charset=UTF-8",
+      "root": "rss",
+      "all_item_hosts": [
+        "www.pbs.org"
+      ],
+      "newest": "Fri, 09 Oct 2026 18:50:33 -0400",
+      "sample_item_url": "https://www.pbs.org/newshour/show/ice-shooting-of-man-in-new-york-with-child-in-his-car-sparks-outrage",
+      "sample_article_final_url": "https://www.pbs.org/newshour/show/ice-shooting-of-man-in-new-york-with-child-in-his-car-sparks-outrage",
+      "sample_article_type": "text/html; charset=UTF-8"
+    },
+    {
+      "id": "votebeat",
+      "url": "https://www.votebeat.org/arc/outboundfeeds/rss/?outputType=xml",
+      "final_url": "https://www.votebeat.org/arc/outboundfeeds/rss/?outputType=xml",
+      "status": 200,
+      "parse": "Atom XML",
+      "items": 100,
+      "newest_item_date": "2026-10-09",
+      "sample_article_status": 200,
+      "auth": "No key, login, or cookie supplied; direct public GET",
+      "content_type": "application/xml; charset=utf-8",
+      "root": "{http://www.w3.org/2005/Atom}feed",
+      "all_item_hosts": [
+        "www.votebeat.org"
+      ],
+      "newest": "2026-10-09T20:42:44+00:00",
+      "sample_item_url": "https://www.votebeat.org/arizona/2026/10/09/2026-secretary-of-state-election-adrian-fontes-alex-kolodin/",
+      "sample_article_final_url": "https://www.votebeat.org/arizona/2026/10/09/2026-secretary-of-state-election-adrian-fontes-alex-kolodin/",
+      "sample_article_type": "text/html; charset=utf-8"
+    },
+    {
+      "id": "texas_sos",
+      "url": "https://www.sos.texas.gov/rss/press.xml",
+      "final_url": "https://www.sos.texas.gov/rss/press.xml",
+      "status": 200,
+      "parse": "RSS XML",
+      "items": 406,
+      "newest_item_date": "2026-10-08 (from item title URL; malformed pubDate)",
+      "sample_article_status": 200,
+      "auth": "No key, login, or cookie supplied; direct public GET",
+      "content_type": "text/xml",
+      "root": "rss",
+      "all_item_hosts": [
+        "gov.texas.gov",
+        "soswebdev",
+        "www.sos.state.tx.us",
+        "www.texaslyceum.org"
+      ],
+      "newest": "Thur 8, Oct 14:00 GMT",
+      "sample_item_url": "https://www.sos.state.tx.us/about/newsreleases/2026/100826.shtml",
+      "sample_article_final_url": "https://www.sos.state.tx.us/about/newsreleases/2026/100826.shtml",
+      "sample_article_type": "text/html"
+    }
+  ],
+  "excluded": [
+    {
+      "url": "https://www.gop.com/feed/",
+      "reason": "HTTP 403; unverified inaccessible feed"
+    },
+    {
+      "url": "https://www.dscc.org/feed/",
+      "reason": "HTTP 200 valid RSS but zero items"
+    },
+    {
+      "url": "https://www.fec.gov/updates/?format=rss",
+      "reason": "HTTP 200 HTML, not RSS"
+    },
+    {
+      "url": "https://www.gp.org/news.rss",
+      "reason": "RSS valid 20 items but newest December 3 2024"
+    }
+  ],
+  "notes": [
+    "www.lp.org/feed/ redirects to lp.org/feed/; canonical chosen.",
+    "Green feed links use HTTP; sampled link upgraded to HTTPS on same host.",
+    "Feeds are not full historical coverage. Ten-item party feeds can lose items between long rotation intervals.",
+    "Ballotpedia ballot-measures feed overlaps main feed; deduplicate if both enabled.",
+    "Partisan feeds preserve source claims; they are not neutral corroboration.",
+    "No candidate-by-candidate campaign inventory or 50-state ballot-measure official coverage has been established.",
+    "EAC root/news pages have shown 403 variability even though RSS and a sampled article were 200.",
+    "Texas SOS feed includes legacy cross-host links and an internal-looking soswebdev hostname. Do not auto-allow item hosts; exclude this feed from a minimal default."
+  ],
+  "robots_checks": [
+    {
+      "id": "ballotpedia",
+      "robots_url": "https://news.ballotpedia.org/robots.txt",
+      "status": 200,
+      "final_url": "https://news.ballotpedia.org/robots.txt",
+      "feed_allowed": true,
+      "sample_article_allowed": true,
+      "crawl_delay": null,
+      "robots_head": null
+    },
+    {
+      "id": "dccc",
+      "robots_url": "https://dccc.org/robots.txt",
+      "status": 200,
+      "final_url": "https://dccc.org/robots.txt",
+      "feed_allowed": true,
+      "sample_article_allowed": true,
+      "crawl_delay": null,
+      "robots_head": null
+    },
+    {
+      "id": "nrcc",
+      "robots_url": "https://www.nrcc.org/robots.txt",
+      "status": 200,
+      "final_url": "https://www.nrcc.org/robots.txt",
+      "feed_allowed": true,
+      "sample_article_allowed": true,
+      "crawl_delay": null,
+      "robots_head": null
+    },
+    {
+      "id": "libertarian",
+      "robots_url": "https://lp.org/robots.txt",
+      "status": 200,
+      "final_url": "https://lp.org/robots.txt",
+      "feed_allowed": true,
+      "sample_article_allowed": true,
+      "crawl_delay": null,
+      "robots_head": null
+    },
+    {
+      "id": "green",
+      "robots_url": "https://www.gp.org/robots.txt",
+      "status": 200,
+      "final_url": "https://www.gp.org/robots.txt",
+      "feed_allowed": true,
+      "sample_article_allowed": true,
+      "crawl_delay": null,
+      "robots_head": null
+    },
+    {
+      "id": "dnc",
+      "robots_url": "https://democrats.org/robots.txt",
+      "status": 200,
+      "final_url": "https://democrats.org/robots.txt",
+      "feed_allowed": true,
+      "sample_article_allowed": true,
+      "crawl_delay": null,
+      "robots_head": null
+    },
+    {
+      "id": "nrsc",
+      "robots_url": "https://www.nrsc.org/robots.txt",
+      "status": 200,
+      "final_url": "https://www.nrsc.org/robots.txt",
+      "feed_allowed": true,
+      "sample_article_allowed": true,
+      "crawl_delay": null,
+      "robots_head": null
+    },
+    {
+      "id": "working_families",
+      "robots_url": "https://workingfamilies.org/robots.txt",
+      "status": 200,
+      "final_url": "https://workingfamilies.org/robots.txt",
+      "feed_allowed": true,
+      "sample_article_allowed": true,
+      "crawl_delay": 3,
+      "robots_head": null
+    },
+    {
+      "id": "eac",
+      "robots_url": "https://www.eac.gov/robots.txt",
+      "status": 200,
+      "final_url": "https://www.eac.gov/robots.txt",
+      "feed_allowed": true,
+      "sample_article_allowed": true,
+      "crawl_delay": null,
+      "robots_head": null
+    },
+    {
+      "id": "ballotpedia_ballot_measures",
+      "robots_url": "https://news.ballotpedia.org/robots.txt",
+      "status": 200,
+      "final_url": "https://news.ballotpedia.org/robots.txt",
+      "feed_allowed": true,
+      "sample_article_allowed": null,
+      "crawl_delay": null,
+      "robots_head": null
+    },
+    {
+      "id": "npr_politics",
+      "robots_url": "https://feeds.npr.org/robots.txt",
+      "status": 404,
+      "feed_allowed": true,
+      "error": "HTTP Error 404: Not Found",
+      "sample_article_allowed": null
+    },
+    {
+      "id": "pbs_politics",
+      "robots_url": "https://www.pbs.org/robots.txt",
+      "status": 200,
+      "final_url": "https://www.pbs.org/robots.txt",
+      "feed_allowed": true,
+      "sample_article_allowed": null,
+      "crawl_delay": 1,
+      "robots_head": null
+    },
+    {
+      "id": "votebeat",
+      "robots_url": "https://www.votebeat.org/robots.txt",
+      "status": 200,
+      "final_url": "https://www.votebeat.org/robots.txt",
+      "feed_allowed": true,
+      "sample_article_allowed": null,
+      "crawl_delay": null,
+      "robots_head": null
+    },
+    {
+      "id": "texas_sos",
+      "robots_url": "https://www.sos.texas.gov/robots.txt",
+      "status": 200,
+      "final_url": "https://www.sos.texas.gov/robots.txt",
+      "feed_allowed": true,
+      "sample_article_allowed": null,
+      "crawl_delay": null,
+      "robots_head": null
+    }
+  ],
+  "collector_exact_user_agent": "election26/0.1 (bounded public-source archive)",
+  "exact_user_agent_feed_checks": [
+    {
+      "id": "ballotpedia",
+      "url": "https://news.ballotpedia.org/feed/",
+      "status": 200,
+      "final_url": "https://news.ballotpedia.org/feed/",
+      "root": "rss",
+      "items": 20,
+      "oldest_retained_item_date": "Tue, 06 Oct 2026 09:30:00 +0000"
+    },
+    {
+      "id": "dccc",
+      "url": "https://dccc.org/feed/",
+      "status": 200,
+      "final_url": "https://dccc.org/feed/",
+      "root": "rss",
+      "items": 10,
+      "oldest_retained_item_date": "Fri, 09 Oct 2026 17:11:07 +0000"
+    },
+    {
+      "id": "nrcc",
+      "url": "https://www.nrcc.org/feed/",
+      "status": 200,
+      "final_url": "https://www.nrcc.org/feed/",
+      "root": "rss",
+      "items": 10,
+      "oldest_retained_item_date": "Thu, 08 Oct 2026 21:23:23 +0000"
+    },
+    {
+      "id": "libertarian",
+      "url": "https://lp.org/feed/",
+      "status": 200,
+      "final_url": "https://lp.org/feed/",
+      "root": "rss",
+      "items": 10,
+      "oldest_retained_item_date": "Mon, 06 Jul 2026 20:16:44 +0000"
+    },
+    {
+      "id": "green",
+      "url": "https://www.gp.org/press_releases.rss",
+      "status": 200,
+      "final_url": "https://www.gp.org/press_releases.rss",
+      "root": "rss",
+      "items": 20,
+      "oldest_retained_item_date": "Fri, 22 Nov 2024 11:59:00 -0500"
+    }
+  ],
+  "optional_article_robots_checks": [
+    {
+      "id": "ballotpedia_ballot_measures",
+      "sample_article_robots_url": "https://news.ballotpedia.org/robots.txt",
+      "status": 200,
+      "allowed": true,
+      "crawl_delay": null
+    },
+    {
+      "id": "npr_politics",
+      "sample_article_robots_url": "https://www.npr.org/robots.txt",
+      "status": 200,
+      "allowed": true,
+      "crawl_delay": null
+    },
+    {
+      "id": "pbs_politics",
+      "sample_article_robots_url": "https://www.pbs.org/robots.txt",
+      "status": 200,
+      "allowed": true,
+      "crawl_delay": 1
+    },
+    {
+      "id": "votebeat",
+      "sample_article_robots_url": "https://www.votebeat.org/robots.txt",
+      "status": 200,
+      "allowed": true,
+      "crawl_delay": null
+    },
+    {
+      "id": "texas_sos",
+      "sample_article_robots_url": "https://www.sos.state.tx.us/robots.txt",
+      "status": 200,
+      "allowed": true,
+      "crawl_delay": null
+    }
+  ]
+}

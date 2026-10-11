@@ -50,3 +50,12 @@ The committed APK SHA-256 is `3550e61f4d9eb49b712fd1bd9519dc37085a4d8eb597c57a34
 Only a successful exact-head Android job is evidence of that tested configuration. Linux tests alone are not Android verification. Physical phones, ARM64, newer Android versions, background scheduling endurance, real site downloads and Whisper inference remain separate validation targets. CI makes no live source collection and deploys nothing to a user device.
 
 References: [yt-dlp Android installation](https://github.com/yt-dlp/yt-dlp/wiki/Installation#android), [Termux release](https://github.com/termux/termux-app/releases/tag/v0.118.3), [emulator runner](https://github.com/ReactiveCircus/android-emulator-runner), [GitHub runner architectures](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+# One-command extracted source kit
+
+The [source ZIP guide](../START-HERE.md) adds `bash ./start-archive.sh` for a literal
+launch-directory `./archive`, selected public sources and bounded/resumable rotation.
+It calls the same installer described below with `--if-needed`, which skips a
+reinstall only after checking the exact installed/source Python-file hashes and
+managed receipt. No cron is enabled. The existing standalone installer remains
+available and preserves its original home-directory configuration and archive.
+
