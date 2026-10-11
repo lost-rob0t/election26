@@ -66,3 +66,7 @@ ordered fairly rather than repeatedly selecting only the oldest broken URL.
 Ordinary URL and media-reference priority also rotates durably between fetch
 passes. Even `max_urls=1` cannot leave one class permanently behind repeated
 failures in the other. Explicit `fetch URL` remains scoped to those URLs.
+
+A fetch-class or media-reference turn is retained when the shared run budget
+defers it before any request is admitted. A costly attempted item still rotates,
+so the nested RSS/fetch/media schedules cannot lock into starvation.

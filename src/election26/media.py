@@ -203,7 +203,10 @@ class MediaCatalog:
             rows += self.db.execute("SELECT * FROM media_references WHERE id<=? ORDER BY id LIMIT ?",
                                     (start, limit - len(rows))).fetchall()
         results = []
+        position = start
         for reference in rows:
+            previous_position = position
+            position = reference["id"]
             self.transaction_budget(1024)
             with self.db:
                 self.db.execute("INSERT OR REPLACE INTO meta VALUES ('media_cursor',?)", (str(reference["id"]),))
@@ -219,6 +222,7 @@ class MediaCatalog:
                 continue
             if len(results) >= limit:
                 break
+            requests_before = getattr(client, "request_count", None)
             try:
                 self.media_event(reference, "pending")
                 self.enqueue([reference["url"]], via="policy-media", source_url=reference["source_url"])
@@ -227,6 +231,9 @@ class MediaCatalog:
                 results.append({"state": "done" if record.get("sha256") else "not_requested",
                                 "media_reference_id": reference["id"]})
             except BudgetError:
+                if requests_before is not None and getattr(client, "request_count", None) == requests_before:
+                    with self.db:
+                        self.db.execute("INSERT OR REPLACE INTO meta VALUES ('media_cursor',?)", (str(previous_position),))
                 results.append({"state": "deferred", "reason": "run_budget_exhausted"})
                 break
             except Exception as exc:

@@ -592,6 +592,80 @@ class MediaPolicyTests(unittest.TestCase):
             self.assertEqual(response.reads, 0)
             self.assertEqual(status(self.root)["capture_observations"], 0)
 
+    def test_composed_runner_rotations_progress_both_media_refs_at_one_request(self):
+        from election26.runner import run_pass
+        rss, bad = "https://news.example/rss", "https://news.example/bad"
+        first, second = "https://cdn.example/one.wav", "https://cdn.example/two.wav"
+        self.opt_in()
+        self.config.feeds = [rss]
+        self.config.max_urls = self.config.max_requests = 1
+        calls = []
+        class OneRequestClient:
+            def __init__(self):
+                self.request_count = 0
+            def open(self, url):
+                if self.request_count >= 1:
+                    raise BudgetError("synthetic exhausted tick")
+                self.request_count += 1
+                calls.append(url)
+                if url == bad:
+                    raise OSError("synthetic permanent ordinary failure")
+                return Response(url, "application/rss+xml", b"<rss/>") if url == rss else Response(url)
+        for fetch_phase in ("ordinary", "media"):
+            for run_phase in ("discover", "fetch"):
+                with self.subTest(fetch_phase=fetch_phase, run_phase=run_phase):
+                    calls.clear()
+                    root = Path(self.tmp.name) / (fetch_phase + "-" + run_phase)
+                    with Archive(root, self.config).writer() as archive:
+                        archive.enqueue([bad])
+                        self.seed(archive, first)
+                        self.seed(archive, second)
+                        with archive.db:
+                            archive.db.execute("INSERT OR REPLACE INTO meta VALUES ('next_fetch_phase',?)", (fetch_phase,))
+                            archive.db.execute("INSERT OR REPLACE INTO meta VALUES ('next_phase',?)", (run_phase,))
+                    for _ in range(8):
+                        before = len(calls)
+                        client = OneRequestClient()
+                        with Archive(root, self.config).writer() as archive:
+                            run_pass(archive, client, mode="rss")
+                        self.assertLessEqual(client.request_count, 1)
+                        self.assertEqual(len(calls) - before, client.request_count)
+                    self.assertIn(first, calls)
+                    self.assertIn(second, calls)
+                    with Archive(root, self.config).writer() as archive:
+                        self.assertEqual({r["state"] for r in archive.media_records()}, {"downloaded"})
+
+    def test_media_cursor_stays_for_unstarted_item_but_rotates_after_costly_attempt(self):
+        self.opt_in()
+        first, second = "https://cdn.example/one.wav", "https://cdn.example/two.wav"
+        class DeferredClient:
+            def __init__(self, consume):
+                self.request_count, self.consume = 0, consume
+            def open(self, url):
+                self.request_count += int(self.consume)
+                raise BudgetError("synthetic exhausted tick")
+        with self.archive.writer() as archive:
+            ref = self.seed(archive, first)
+            self.seed(archive, second)
+            archive.fetch_media(DeferredClient(False), 1)
+            self.assertEqual(archive.db.execute("SELECT value FROM meta WHERE key='media_cursor'").fetchone()[0], "0")
+            archive.fetch_media(DeferredClient(True), 1)
+            self.assertEqual(archive.db.execute("SELECT value FROM meta WHERE key='media_cursor'").fetchone()[0], str(ref["id"]))
+            client = Client({second: Response(second)})
+            archive.fetch_media(client, 1)
+            self.assertEqual(client.calls, [second])
+
+    def test_local_only_media_turn_completes_and_rotates_without_requests(self):
+        with self.archive.writer() as archive:
+            self.seed(archive)
+            with archive.db:
+                archive.db.execute("INSERT INTO meta VALUES ('next_fetch_phase','media')")
+            client = Client({})
+            client.request_count = 0
+            self.assertEqual(archive.fetch(client), [])
+            self.assertEqual(client.calls, [])
+            self.assertEqual(archive.db.execute("SELECT value FROM meta WHERE key='next_fetch_phase'").fetchone()[0], "ordinary")
+
 
 if __name__ == "__main__":
     unittest.main()

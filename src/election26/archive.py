@@ -329,6 +329,12 @@ class Archive(MediaCatalog):
         results = []
         attempted_media = set()
         media_first = False
+        requests_before = getattr(client, "request_count", None)
+        def retain_unstarted_turn():
+            if requests_before is not None and getattr(client, "request_count", None) == requests_before:
+                with self.db:
+                    self.db.execute("INSERT OR REPLACE INTO meta VALUES ('next_fetch_phase',?)",
+                                    ("media" if media_first else "ordinary",))
         if not urls:
             row = self.db.execute("SELECT value FROM meta WHERE key='next_fetch_phase'").fetchone()
             media_first = bool(row and row[0] == "media")
@@ -339,6 +345,7 @@ class Archive(MediaCatalog):
             if media_first:
                 results = self.fetch_media(client, self.config.max_urls)
                 if any(item["state"] == "deferred" for item in results):
+                    retain_unstarted_turn()
                     return results
         remaining = self.config.max_urls - len(results)
         if remaining <= 0:
@@ -409,6 +416,8 @@ class Archive(MediaCatalog):
                 results.append({"state": "failed", "error": type(exc).__name__})
         if not urls and not media_first and not any(r["state"] == "deferred" for r in results):
             results.extend(self.fetch_media(client, max(0, self.config.max_urls - len(results)), exclude=attempted_media))
+        if not urls and any(r["state"] == "deferred" for r in results):
+            retain_unstarted_turn()
         return results
 
     def repair_manifests(self):
