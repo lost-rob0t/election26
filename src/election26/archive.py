@@ -432,6 +432,8 @@ class Archive(MediaCatalog):
             if not path.exists():
                 self.budget(len(row["payload"].encode()) + 4096)
                 atomic_json(path, dict(json.loads(row["payload"]), id=row["id"]))
+        from .spool import repair
+        repair(self)
 
     def backup(self, path):
         path = Path(path).expanduser().resolve()
@@ -459,13 +461,20 @@ def status(root):
     if not path.exists():
         return {"initialized": False, "capture_observations": 0, "unique_objects": 0,
                 "original_bytes": 0, "stored_object_bytes": 0, "canonical_documents": 0,
-                "transcripts": 0, "errors": 0, "queue": {}}
+                "transcripts": 0, "errors": 0, "queue": {}, "imported_observations": 0,
+                "incomplete_imported_observations": 0, "import_metadata_bytes": 0}
     if path.is_symlink():
         raise PolicyError("Archive catalog symlinks are not supported")
     with contextlib.closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db, db:
         db.execute("BEGIN")  # All counters come from the same committed snapshot.
         rows = db.execute("SELECT sha256, MAX(bytes) FROM captures GROUP BY sha256").fetchall()
+        imported = {"imported_observations": 0, "incomplete_imported_observations": 0, "import_metadata_bytes": 0}
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='spool_imports'").fetchone():
+            count, incomplete, metadata = db.execute("SELECT COUNT(*),COALESCE(SUM(complete=0),0),COALESCE(SUM(receipt_bytes),0) FROM spool_imports").fetchone()
+            metadata += db.execute("SELECT COALESCE(SUM(identity_bytes),0) FROM spool_sources").fetchone()[0]
+            imported = {"imported_observations": count, "incomplete_imported_observations": incomplete, "import_metadata_bytes": metadata}
         return {
+            **imported,
             "initialized": True,
             "capture_observations": db.execute("SELECT COUNT(*) FROM captures").fetchone()[0],
             "unique_objects": len(rows),
@@ -494,6 +503,10 @@ def gc_plan(archive):
                 and sha256_file(source) == row["sha256"]):
             candidates.append(row["sha256"])
     known = {r[0] for r in archive.db.execute("SELECT DISTINCT sha256 FROM captures")}
+    from .spool import present
+    if present(archive.db):
+        known.update(r[0] for r in archive.db.execute("SELECT receipt_sha256 FROM spool_imports"))
+        known.update(r[0] for r in archive.db.execute("SELECT identity_sha256 FROM spool_sources"))
     orphans = [p.name for p in (archive.root / "objects").glob("*/*") if p.is_file() and p.name not in known]
     return {"dry_run": True, "deletion_supported": False,
             "raw_candidates_after_human_review": candidates, "orphan_objects": orphans,

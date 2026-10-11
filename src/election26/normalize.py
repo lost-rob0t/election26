@@ -40,21 +40,34 @@ def normalize(archive, capture_id):
         if not path.exists() or sha256_file(path) != existing["document_sha256"]:
             raise PolicyError("Existing canonical document is missing or corrupt")
         return {"state": "already_normalized", "capture_id": capture_id}
+    from .spool import normalization_context
+    imported = normalization_context(archive, row)
+    observed = imported["observed_at"] if imported else row["captured_at"]
+    status = imported["status"] if imported else 200
+    source_record = imported["source_record_id"] if imported else "election26-observation:" + hashlib.sha256(
+        (row["url"] + row["captured_at"] + row["sha256"]).encode("utf-8")).hexdigest()
     adapter = sdk()
+    dataset = f"election26-{archive.config.country.lower()}-{archive.config.year}"
+    identity = {}
+    if imported:
+        # The producer sequence disambiguates identical bodies/timestamps. Use
+        # the pinned SDK's existing ID function, not a new wire ID convention.
+        from starintel_doc.network_capture import stable_capture_id
+        identity["transaction_id"] = stable_capture_id(
+            "http-transaction", dataset, {"source_capture_id": source_record})
     headers = {"content-type": row["content_type"]}
     if row["etag"]:
         headers["etag"] = row["etag"]
     if row["last_modified"]:
         headers["last-modified"] = row["last_modified"]
     document = adapter.build_http_transaction(
-        dataset=f"election26-{archive.config.country.lower()}-{archive.config.year}",
-        method="GET", url=row["final_url"], response_status=200,
-        response_headers=headers, observed_at=row["captured_at"],
+        dataset=dataset, **identity,
+        method="GET", url=row["final_url"], response_status=status,
+        response_headers=headers, observed_at=observed,
         fields={
-            "observedAt": int(datetime.fromisoformat(row["captured_at"]).timestamp()),
+            "observedAt": int(datetime.fromisoformat(observed).timestamp()),
             "sourceUrls": list(dict.fromkeys([row["url"], row["final_url"]])),
-            "sourceRecordIds": ["election26-observation:" + hashlib.sha256(
-                (row["url"] + row["captured_at"] + row["sha256"]).encode("utf-8")).hexdigest()],
+            "sourceRecordIds": [source_record],
             "responseBodyHash": row["sha256"], "responseBodySize": row["bytes"],
             "responseBodyArtifactUri": "urn:sha256:" + row["sha256"],
         })

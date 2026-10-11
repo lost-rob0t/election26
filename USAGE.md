@@ -208,6 +208,13 @@ There is no network service or dashboard. Optional StarIntel metadata normalizat
 tests run with fixtures, the canonical SDK job also installs the exact real SDK and validates the generated
 contract. Whisper model inference remains untested. Raw originals always survive adapter failures.
 
+## Local FediWatch spools
+
+`import-spool` verifies and imports an existing `fediwatch.raw.v1` producer spool
+without network activity, retaining exact bodies/receipts, source observation
+times and sequence IDs. See [the producer/import workflow](docs/FEDIWATCH.md).
+Timed Star Server replay remains a separate pending integration.
+
 ## Official references
 
 - [Brave Web Search request contract](https://api-dashboard.search.brave.com/api-reference/web/search/get)

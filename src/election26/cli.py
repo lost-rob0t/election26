@@ -33,6 +33,9 @@ def parser():
     commands.add_parser("repair", help="Rebuild missing JSON manifests from the transactional catalog")
     backup = commands.add_parser("backup", help="Copy a consistent local archive snapshot to a new directory")
     backup.add_argument("destination")
+    spool = commands.add_parser("import-spool", help="Offline verified FediWatch raw-spool import; no network or producer writes")
+    spool.add_argument("source")
+    spool.add_argument("--limit", type=int, help="New observations per invocation, within max_urls")
     trans = commands.add_parser("transcribe", help="Local Whisper only; no source media is uploaded")
     trans.add_argument("sha256")
     trans.add_argument("--model-path", help="Pre-downloaded trusted Whisper model checkpoint")
@@ -50,9 +53,15 @@ def main(argv=None):
         if args.command == "status":
             result = status(args.archive)
         else:
+            if args.command == "import-spool":
+                from .spool import separate_paths
+                separate_paths(args.source, args.archive)
             with Archive(args.archive, config).writer() as archive:
-                client = PublicHTTP(config)
-                if args.command == "run":
+                client = None if args.command == "import-spool" else PublicHTTP(config)
+                if args.command == "import-spool":
+                    from .spool import import_spool
+                    result = import_spool(archive, args.source, args.limit)
+                elif args.command == "run":
                     from .runner import run_pass
                     result = run_pass(archive, client, args.mode, args.refresh, args.extract_media)
                 elif args.command == "discover":
