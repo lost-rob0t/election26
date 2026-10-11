@@ -138,6 +138,21 @@ class SpoolImportTests(unittest.TestCase):
             self.assertEqual(archive.db.execute("SELECT COUNT(*) FROM captures").fetchone()[0], 1)
         self.assertTrue((self.root / "manifests/import-1.json").is_file())
 
+    def test_interrupted_repair_never_publishes_generic_partial_manifest(self):
+        fixture(self.source, complete=False, error="truncated_response")
+        with self.archive.writer() as archive:
+            import_spool(archive, self.source)
+            path = self.root / "manifests/1.json"
+            path.unlink()
+            with patch("election26.spool.repair", side_effect=OSError("fixture interruption")), self.assertRaises(OSError):
+                archive.repair_manifests()
+            self.assertFalse(path.exists())
+            archive.repair_manifests()
+            value = json.loads(path.read_text())["local_import"]
+            self.assertIs(value["complete"], False)
+            self.assertEqual(value["http_status"], 200)
+            self.assertEqual(value["external_capture_id"], IDENTITY["spool_id"] + ":1")
+
     def test_transaction_failure_never_publishes_capture_or_import_checkpoint(self):
         fixture(self.source)
         with self.archive.writer() as archive:
@@ -185,6 +200,39 @@ class SpoolImportTests(unittest.TestCase):
                     import_spool(archive, self.source)
                 self.assertEqual(status(self.root)["capture_observations"], 0)
 
+    def test_contradictory_complete_receipts_never_commit(self):
+        cases = [dict(error="truncated_response"),
+                 dict(headers={"content-length": "999"}),
+                 dict(headers={"content-length": "not-a-number"}),
+                 dict(headers={"transfer-encoding": "Chunked"}),
+                 dict(headers={"transfer-encoding": "gzip, chunked"})]
+        for changes in cases:
+            with self.subTest(changes=changes):
+                fixture(self.source, data=b"sixsix", **changes)
+                with self.archive.writer() as archive, self.assertRaises(PolicyError):
+                    import_spool(archive, self.source)
+                self.assertEqual(status(self.root)["capture_observations"], 0)
+        fixture(self.source, data=b"sixsix", headers={"content-length": "6", "transfer-encoding": "chunked"})
+        with self.archive.writer() as archive:
+            self.assertEqual(import_spool(archive, self.source)["imported"], 1)
+
+    def test_already_normalized_import_still_requires_intact_receipt(self):
+        from election26.normalize import normalize, SDK_COMMIT
+        fixture(self.source)
+        with self.archive.writer() as archive:
+            import_spool(archive, self.source)
+            payload = b'{"synthetic_existing_record": true}'
+            path = self.root / "canonical/1.json"
+            path.write_bytes(payload)
+            with archive.db:
+                archive.db.execute("INSERT INTO normalizations VALUES (?,?,?,?,?)",
+                                   (1, "fixture-id", hashlib.sha256(payload).hexdigest(), "canonical/1.json", SDK_COMMIT))
+            self.assertEqual(normalize(archive, 1)["state"], "already_normalized")
+            row = archive.db.execute("SELECT receipt_sha256 FROM spool_imports").fetchone()
+            archive.object_path(row[0]).write_bytes(b"corrupt")
+            with self.assertRaises(PolicyError):
+                normalize(archive, 1)
+
     def test_symlink_body_or_directory_is_never_read(self):
         receipt = fixture(self.source)
         outside = self.base / "outside"; outside.write_bytes(b"outside must stay outside")
@@ -209,6 +257,27 @@ class SpoolImportTests(unittest.TestCase):
         with self.archive.writer() as archive:
             result = import_spool(archive, self.source)
             self.assertEqual((result["imported"], result["orphan_files"]), (1, 2))
+
+    def test_browser_and_import_provenance_coexist_through_repair_and_backup(self):
+        from election26 import browser_catalog
+        fixture(self.source, complete=False, error="truncated_response")
+        backup = self.base / "combined-backup"
+        with self.archive.writer() as archive:
+            import_spool(archive, self.source)
+            session = browser_catalog.start(archive, "https://fixture.example/page", {})
+            browser_catalog.derived(archive, session, "rendered_dom", b"<html>synthetic DOM</html>")
+            browser_catalog.finish(archive, session, "complete")
+            self.assertEqual(gc_plan(archive)["orphan_objects"], [])
+            (self.root / "manifests/1.json").unlink()
+            (self.root / "manifests/browser-1.json").unlink()
+            archive.repair_manifests()
+            self.assertIs(json.loads((self.root / "manifests/1.json").read_text())["local_import"]["complete"], False)
+            self.assertEqual(len(json.loads((self.root / "manifests/browser-1.json").read_text())["artifacts"]), 1)
+            archive.backup(backup)
+        stats = status(self.root)
+        self.assertEqual((stats["imported_observations"], stats["browser_sessions"], stats["browser_artifacts"]), (1, 1, 1))
+        self.assertEqual(stats["unique_objects"], 2)
+        self.assertEqual(status(backup), stats)
 
     def test_backup_restore_preserves_import_receipts(self):
         fixture(self.source)

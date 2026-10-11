@@ -187,7 +187,20 @@ def validate(receipt, identity, stem, config):
     if (type(receipt["next_poll_at"]) not in (int, float) or not math.isfinite(receipt["next_poll_at"])
             or receipt["next_poll_at"] < 0 or not integer(receipt["failures"], 0, 10)):
         raise PolicyError("Invalid spool producer backoff metadata")
+    validate_completeness(receipt)
     return receipt
+
+
+def validate_completeness(receipt):
+    """Verify implications of the pinned producer's fetchRaw completion flag."""
+    if not receipt["complete"]:
+        return
+    headers = receipt["headers"]
+    expected = headers.get("content-length", "")
+    if (receipt["error"] or headers.get("transfer-encoding", "") not in ("", "chunked")
+            or (expected and (re.fullmatch(r"[+-]?[0-9]+", expected) is None
+                              or int(expected) != receipt["bytes"]))):
+        raise PolicyError("Complete spool receipt contradicts its transport metadata")
 
 
 def initialize(archive):
@@ -362,7 +375,8 @@ def normalization_context(archive, capture):
     if row is None:
         return None
     path = archive.object_path(row["receipt_sha256"])
-    if (not path.is_file() or path.stat().st_size != row["receipt_bytes"]
+    if (not integer(row["receipt_bytes"], 0, METADATA_LIMIT)
+            or not path.is_file() or path.stat().st_size != row["receipt_bytes"]
             or sha256_file(path) != row["receipt_sha256"]):
         raise PolicyError("Imported receipt must remain intact before normalization")
     receipt = strict_json(path.read_bytes())
@@ -370,6 +384,7 @@ def normalization_context(archive, capture):
             or receipt["bytes"] != capture["bytes"] or receipt["observed_at"] != row["observed_at"]
             or receipt["completed_at"] != capture["captured_at"]):
         raise PolicyError("Imported provenance no longer matches its archived capture")
+    validate_completeness(receipt)
     if not receipt["complete"] or not 100 <= receipt["status"] <= 599:
         raise PolicyError("Partial or transport-error imports remain raw and cannot be normalized")
     return {"observed_at": receipt["observed_at"], "status": receipt["status"],

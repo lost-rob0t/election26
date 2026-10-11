@@ -101,7 +101,7 @@ class Archive(MediaCatalog):
         if self.db is not None:
             raise PolicyError("Archive writer is already active")
         durable_mkdir(self.root)
-        allowed_names = {".writer.lock", "catalog.sqlite", "catalog.sqlite-journal", "objects", "tmp", "transcripts", "manifests", "canonical", "backup.json"}
+        allowed_names = {".writer.lock", ".browser.lock", "catalog.sqlite", "catalog.sqlite-journal", "objects", "tmp", "transcripts", "manifests", "canonical", "backup.json"}
         if any(p.name not in allowed_names or p.is_symlink() for p in self.root.iterdir()):
             raise PolicyError("Archive directory contains unrecognized files or symlinks")
         if any(p.is_symlink() for p in self.root.rglob("*")):
@@ -265,7 +265,7 @@ class Archive(MediaCatalog):
         finally:
             temp.unlink(missing_ok=True)
 
-    def capture(self, url, response, source_url=None, reference=None, max_bytes=None):
+    def capture(self, url, response, source_url=None, reference=None, max_bytes=None, browser_request_id=None):
         url = self.config.permit(url)
         final_url = self.config.permit(response.url)
         source_url = source_url or (reference["source_url"] if reference else url)
@@ -275,6 +275,10 @@ class Archive(MediaCatalog):
         for name in ("content-type", "etag", "last-modified", "content-encoding", "content-length"):
             if len(response.headers.get(name, "").encode("utf-8")) > 1024:
                 raise PolicyError("Source metadata exceeds the per-field limit")
+        if browser_request_id is not None:
+            csp = response.headers.get('content-security-policy', '')
+            if len(csp.encode()) > 8192 or any(ord(c) < 32 and c != '\t' for c in csp):
+                raise PolicyError('Source content security policy exceeds browser metadata limits')
         policy = None
         if reference or content_kind(response.headers.get("content-type")) or url_kind(url) or url_kind(final_url):
             reference = reference or self.media_reference(url, source_url, kind_hint=url_kind(url))
@@ -304,6 +308,9 @@ class Archive(MediaCatalog):
                 "VALUES (:url,:final_url,:captured_at,:sha256,:bytes,:content_type,:etag,:last_modified,:content_encoding,:source_url,:media_reference_id,:format_version)", record)
             self.db.execute("UPDATE resources SET state='done',error=NULL WHERE url=?", (url,))
             record["id"] = cursor.lastrowid
+            if browser_request_id is not None:
+                from .browser_catalog import original
+                original(self, browser_request_id, record, response)
             event = self.media_event(reference, "downloaded", capture=record, response=response, transactional=True) if reference else None
         try:
             atomic_json(self.root / "manifests" / (str(record["id"]) + ".json"), record)
@@ -351,7 +358,7 @@ class Archive(MediaCatalog):
         if remaining <= 0:
             return results
         query = "SELECT url,source_url,via FROM resources"
-        conditions = [] if urls else ["via!='policy-media'"]
+        conditions = [] if urls else ["via NOT IN ('policy-media','browser')"]
         params = []
         if not refresh:
             conditions.append("state IN ('pending','failed','not_requested')" if urls else "state IN ('pending','failed')")
@@ -421,7 +428,16 @@ class Archive(MediaCatalog):
         return results
 
     def repair_manifests(self):
+        from .spool import present, repair
+        from .browser_catalog import repair as repair_browser
+        repair_browser(self)
+        has_imports = present(self.db)
         for row in self.db.execute("SELECT * FROM captures"):
+            if has_imports and self.db.execute(
+                    "SELECT 1 FROM spool_imports WHERE capture_id=?", (row["id"],)).fetchone():
+                # Never publish a generic intermediate that loses partial/error
+                # status or producer provenance, even if later repair is interrupted.
+                continue
             path = self.root / "manifests" / (str(row["id"]) + ".json")
             if not path.exists():
                 self.budget(len(json.dumps(dict(row)).encode("utf-8")) + 4096)
@@ -432,7 +448,6 @@ class Archive(MediaCatalog):
             if not path.exists():
                 self.budget(len(row["payload"].encode()) + 4096)
                 atomic_json(path, dict(json.loads(row["payload"]), id=row["id"]))
-        from .spool import repair
         repair(self)
 
     def backup(self, path):
@@ -473,13 +488,20 @@ def status(root):
             count, incomplete, metadata = db.execute("SELECT COUNT(*),COALESCE(SUM(complete=0),0),COALESCE(SUM(receipt_bytes),0) FROM spool_imports").fetchone()
             metadata += db.execute("SELECT COALESCE(SUM(identity_bytes),0) FROM spool_sources").fetchone()[0]
             imported = {"imported_observations": count, "incomplete_imported_observations": incomplete, "import_metadata_bytes": metadata}
+        browser = db.execute("SELECT 1 FROM sqlite_master WHERE name='browser_artifacts'").fetchone()
+        all_objects = dict(rows)
+        if browser:
+            for digest, size in db.execute("SELECT sha256,MAX(bytes) FROM browser_artifacts GROUP BY sha256"):
+                all_objects[digest] = max(all_objects.get(digest, 0), size)
         return {
             **imported,
+            "browser_sessions": db.execute("SELECT COUNT(*) FROM browser_sessions").fetchone()[0] if browser else 0,
+            "browser_artifacts": db.execute("SELECT COUNT(*) FROM browser_artifacts").fetchone()[0] if browser else 0,
             "initialized": True,
             "capture_observations": db.execute("SELECT COUNT(*) FROM captures").fetchone()[0],
-            "unique_objects": len(rows),
+            "unique_objects": len(all_objects),
             "original_bytes": db.execute("SELECT COALESCE(SUM(bytes),0) FROM captures").fetchone()[0],
-            "stored_object_bytes": sum(r[1] for r in rows),
+            "stored_object_bytes": sum(all_objects.values()),
             "canonical_documents": db.execute("SELECT COUNT(*) FROM normalizations").fetchone()[0] if db.execute("SELECT 1 FROM sqlite_master WHERE name='normalizations'").fetchone() else 0,
             "transcripts": db.execute("SELECT COUNT(*) FROM transcripts").fetchone()[0],
             "errors": db.execute("SELECT COUNT(*) FROM resources WHERE state='failed'").fetchone()[0],
@@ -507,6 +529,9 @@ def gc_plan(archive):
     if present(archive.db):
         known.update(r[0] for r in archive.db.execute("SELECT receipt_sha256 FROM spool_imports"))
         known.update(r[0] for r in archive.db.execute("SELECT identity_sha256 FROM spool_sources"))
+    from .browser_catalog import exists
+    if exists(archive.db):
+        known.update(r[0] for r in archive.db.execute("SELECT DISTINCT sha256 FROM browser_artifacts"))
     orphans = [p.name for p in (archive.root / "objects").glob("*/*") if p.is_file() and p.name not in known]
     return {"dry_run": True, "deletion_supported": False,
             "raw_candidates_after_human_review": candidates, "orphan_objects": orphans,

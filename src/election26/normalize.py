@@ -34,14 +34,14 @@ def normalize(archive, capture_id):
     source = archive.object_path(row["sha256"])
     if not source.is_file() or sha256_file(source) != row["sha256"]:
         raise PolicyError("Original source bytes must be intact before normalization")
+    from .spool import normalization_context
+    imported = normalization_context(archive, row)
     existing = archive.db.execute("SELECT * FROM normalizations WHERE capture_id=?", (capture_id,)).fetchone()
     path = archive.safe_path(Path("canonical") / (str(capture_id) + ".json"))
     if existing:
         if not path.exists() or sha256_file(path) != existing["document_sha256"]:
             raise PolicyError("Existing canonical document is missing or corrupt")
         return {"state": "already_normalized", "capture_id": capture_id}
-    from .spool import normalization_context
-    imported = normalization_context(archive, row)
     observed = imported["observed_at"] if imported else row["captured_at"]
     status = imported["status"] if imported else 200
     source_record = imported["source_record_id"] if imported else "election26-observation:" + hashlib.sha256(
