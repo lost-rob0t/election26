@@ -50,6 +50,7 @@ def canonical_url(url):
 @dataclass
 class Config:
     allowed_hosts: list[str] = field(default_factory=list)
+    media_policies: dict = field(default_factory=dict)
     manual_urls: list[str] = field(default_factory=list)
     feeds: list[str] = field(default_factory=list)
     country: str = "US"
@@ -112,6 +113,28 @@ class Config:
         self.allowed_hosts = [h.lower() for h in self.allowed_hosts]
         if any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", h) for h in self.allowed_hosts):
             raise PolicyError("Use exact DNS hostnames, without wildcards or ports")
+
+        if not isinstance(self.media_policies, dict):
+            raise PolicyError("media_policies must map exact source hosts to policies")
+        for host, policy in self.media_policies.items():
+            if host not in self.allowed_hosts:
+                raise PolicyError("Media policy source hosts must be explicitly allowlisted")
+            if not isinstance(policy, dict) or set(policy) - {
+                    "download", "types", "max_file_bytes", "max_total_bytes", "min_free_bytes"}:
+                raise PolicyError("Invalid source media policy fields")
+            if type(policy.get("download", False)) is not bool:
+                raise PolicyError("Media download opt-in must be a JSON boolean")
+            types = policy.get("types", [])
+            if (not isinstance(types, list) or any(type(t) is not str or t not in
+                    {"audio", "video", "image", "document"} for t in types)):
+                raise PolicyError("Media types must select audio, video, image or document")
+            for name in ("max_file_bytes", "max_total_bytes", "min_free_bytes"):
+                if name in policy and (type(policy[name]) is not int or policy[name] <
+                                       (0 if name == "min_free_bytes" else 1)):
+                    raise PolicyError("Media budgets must be explicit finite integers")
+            if policy.get("download") and (not types or any(name not in policy for name in
+                    ("max_file_bytes", "max_total_bytes", "min_free_bytes"))):
+                raise PolicyError("Media opt-in requires selected types and all three budgets")
 
     @classmethod
     def load(cls, path=None):

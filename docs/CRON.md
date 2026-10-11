@@ -39,7 +39,9 @@ with `--install` to append it to the current user's readable crontab. The instal
 preserves existing entries and refuses duplicate managed blocks. If no readable
 crontab exists, it stops and asks the operator to initialize it rather than
 silently replacing anything. This repository never installs cron automatically. The generated block does not
-request media extraction/downloads. See the [Termux guide](TERMUX.md) for Android
+grant media download permission. Keep `media_policies` empty for links-first
+collection; adding an explicit source policy allows its selected bounded media
+requests on subsequent ticks. See [media policy](MEDIA.md) and the [Termux guide](TERMUX.md) for Android
 process-lifetime limits before relying on a phone schedule.
 
 The example runs collection every five minutes and includes a commented
@@ -60,3 +62,11 @@ Already queued links do not consume the new-candidate allowance, and individual
 feed failures are isolated, and untouched
 pending URLs are attempted before retrying failed items. Retry attempts are
 ordered fairly rather than repeatedly selecting only the oldest broken URL.
+
+Ordinary URL and media-reference priority also rotates durably between fetch
+passes. Even `max_urls=1` cannot leave one class permanently behind repeated
+failures in the other. Explicit `fetch URL` remains scoped to those URLs.
+
+A fetch-class or media-reference turn is retained when the shared run budget
+defers it before any request is admitted. A costly attempted item still rotates,
+so the nested RSS/fetch/media schedules cannot lock into starvation.

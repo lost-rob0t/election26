@@ -17,16 +17,17 @@ def parser():
     run = commands.add_parser("run", help="One bounded cron-friendly discovery/fetch pass")
     run.add_argument("--mode", choices=["manual", "rss", "none"], default="manual")
     run.add_argument("--refresh", action="store_true")
-    run.add_argument("--extract-media", action="store_true")
+    run.add_argument("--extract-media", action="store_true", help="Compatibility flag; references are always recorded, source policy alone permits downloads")
     discovery = commands.add_parser("discover", help="Queue bounded allowlisted candidates")
     discovery.add_argument("--mode", choices=["manual", "rss", "brave"], default="manual")
     discovery.add_argument("--query", help="Explicit Brave query; config must also enable API usage")
     fetch = commands.add_parser("fetch", help="Archive pending URLs, or explicit URLs")
     fetch.add_argument("urls", nargs="*")
     fetch.add_argument("--refresh", action="store_true", help="Capture new observations, retaining prior versions")
-    fetch.add_argument("--extract-media", action="store_true", help="Queue allowlisted direct media links from archived HTML")
+    fetch.add_argument("--extract-media", action="store_true", help="Compatibility flag; never overrides source media policy")
     normal = commands.add_parser("normalize", help="Optional canonical StarIntel HTTP metadata only")
     normal.add_argument("capture_id", type=int)
+    commands.add_parser("media", help="Replay latest media outcomes and verify downloaded originals locally")
     commands.add_parser("status", help="Read committed aggregate counters")
     commands.add_parser("gc", help="Dry-run retention plan only; never deletes data")
     commands.add_parser("repair", help="Rebuild missing JSON manifests from the transactional catalog")
@@ -61,6 +62,8 @@ def main(argv=None):
                 elif args.command == "normalize":
                     from .normalize import normalize
                     result = normalize(archive, args.capture_id)
+                elif args.command == "media":
+                    result = archive.media_records()
                 elif args.command == "gc":
                     result = gc_plan(archive)
                 elif args.command == "repair":

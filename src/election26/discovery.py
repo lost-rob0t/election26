@@ -12,30 +12,72 @@ class MediaParser(HTMLParser):
         super().__init__()
         self.base = base
         self.links = []
+        self.parents = []
 
     def handle_starttag(self, tag, attrs):
+        from .media import url_kind
         attrs = dict(attrs)
         values = []
+        hint = {"audio": "audio", "video": "video", "img": "image"}.get(tag)
+        if tag in {"audio", "video"}:
+            self.parents.append(tag)
+        if tag == "source":
+            hint = self.parents[-1] if self.parents else None
         if tag in {"audio", "video", "source", "img"}:
-            values.append(attrs.get("src"))
+            values.append((attrs.get("src"), hint, attrs.get("type")))
             if tag == "video":
-                values.append(attrs.get("poster"))
-        if tag == "a" and attrs.get("href", "").split("?")[0].lower().endswith((".mp4", ".mp3", ".wav", ".m4a", ".ogg", ".webm", ".pdf", ".jpg", ".png")):
-            values.append(attrs["href"])
+                values.append((attrs.get("poster"), "image", None))
+        if tag == "a" and url_kind(attrs.get("href", "")):
+            values.append((attrs["href"], url_kind(attrs["href"]), attrs.get("type")))
         if tag == "meta" and attrs.get("property") in {"og:video", "og:video:url", "og:audio", "og:image"}:
-            values.append(attrs.get("content"))
-        for value in values:
-            if value:
+            values.append((attrs.get("content"), attrs["property"].split(":")[1], None))
+        for value, kind, content_type in values:
+            if value and len(self.links) < 500:
                 try:
-                    self.links.append(canonical_url(urljoin(self.base, value)))
+                    self.links.append({"url": canonical_url(urljoin(self.base, value)),
+                                       "content_type": content_type, "kind_hint": kind})
                 except ValueError:
                     continue
 
+    def handle_endtag(self, tag):
+        if self.parents and self.parents[-1] == tag:
+            self.parents.pop()
 
-def media_links(html, base):
+
+def media_references(html, base):
     parser = MediaParser(base)
     parser.feed(html)
-    return list(dict.fromkeys(parser.links))
+    return parser.links
+
+
+def media_links(html, base):
+    return list(dict.fromkeys(item["url"] for item in media_references(html, base)))
+
+
+def feed_references(data, base):
+    from .media import declared_size, url_kind
+    # Apply the same entity/DTD guard before either parser.
+    feed_links(data)
+    links = []
+    for item in ET.fromstring(data).iter():
+        tag = item.tag.rsplit("}", 1)[-1]
+        if tag == "enclosure" or (tag == "link" and item.attrib.get("rel") == "enclosure"):
+            value = item.attrib.get("url") or item.attrib.get("href")
+            if not value:
+                continue
+            try:
+                url = canonical_url(urljoin(base, value))
+            except ValueError:
+                continue
+            try:
+                size = declared_size(item.attrib.get("length"))
+            except ValueError:
+                size = None  # Preserve the link; malformed lengths remain in raw XML.
+            links.append({"url": url, "content_type": item.attrib.get("type"),
+                          "advertised_bytes": size, "kind_hint": url_kind(url)})
+            if len(links) >= 500:
+                break
+    return links
 
 
 def feed_links(data):
@@ -51,8 +93,7 @@ def feed_links(data):
                 value = item.attrib.get("href") or item.text
                 if value:
                     links.append(value.strip())
-        # RSS enclosure / Atom rel=enclosure links stay in the raw feed.
-        # Downloading them requires the future explicit per-source media policy.
+        # Enclosures are recorded separately with their source's media policy.
     return list(dict.fromkeys(links))
 
 
@@ -71,18 +112,16 @@ def discover(archive, client, mode, query=None):
             url = config.feeds[index]
             requests_before = getattr(client, "request_count", 0)
             try:
+                archive.enqueue([url], via="rss-feed")
                 with client.open(url) as response:
-                    # Archive original feed bytes before interpreting them.
-                    data = response.read_bounded(min(config.max_file_bytes, 4 * 1024 * 1024))
-                    archive.enqueue([url], via="rss-feed")
-                    class FeedResponse:
-                        pass
-                    original = FeedResponse()
-                    original.url = response.url
-                    original.headers = response.headers
-                    original.chunks = lambda: iter([data])
-                    archive.capture(config.permit(url), original)
-                    candidates.extend(feed_links(data))
+                    # Admission precedes every body read, including deceptive feed URLs.
+                    record = archive.capture(config.permit(url), response, max_bytes=4 * 1024 * 1024)
+                if record.get("sha256") and record["content_encoding"] in (None, "identity"):
+                    data = archive.object_path(record["sha256"]).read_bytes()
+                    if record["content_type"].split(";", 1)[0].strip().lower() in {
+                            "application/xml", "text/xml", "application/rss+xml", "application/atom+xml"}:
+                        candidates.extend(feed_links(data))
+                        archive.record_media_links(record, feed_references(data, record["final_url"]))
             except BudgetError:
                 deferred = True
                 # A costly feed must not monopolize every future discovery tick.
