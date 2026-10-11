@@ -4,6 +4,7 @@
   "date_from": "2026-01-01",
   "date_to": "2026-12-31",
   "allowed_hosts": [],
+  "media_policies": {},
   "manual_urls": [],
   "feeds": [],
   "max_file_bytes": 268435456,

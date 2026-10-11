@@ -29,7 +29,7 @@ The initial host allowlist is empty. Review disk/free-space budgets and configur
   --archive "$HOME/.local/share/election26/archive" status
 ```
 
-No GitHub account, CI service, central server, paid API, or canonical SDK is required at runtime. Raw capture runs before optional normalization. HTML/JSON keeps the source's embedded media links by default, and RSS/Atom enclosures are not queued. Existing queued/manual/article URLs are not yet response-type-gated; review those inputs before a links-only run. Bulk media downloads are not part of phone setup; per-source type/size policy is a separate planned slice. Transcription never triggers an implicit download.
+No GitHub account, CI service, central server, paid API, or canonical SDK is required at runtime. Raw capture runs before optional normalization. HTML/JSON keeps original media references, and HTML/RSS/Atom links have separate metadata observations. Every ordinary/manual/article/feed response is gated before raw media body reads. Downloads require an explicit per-source policy with selected types and disk limits; the empty default stays links-first. See [media policy](MEDIA.md). Bulk media downloads are not part of phone setup, and transcription never triggers an implicit download.
 
 ## Optional yt-dlp and scheduling
 

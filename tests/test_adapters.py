@@ -129,6 +129,8 @@ class AdapterTests(unittest.TestCase):
         model = Path(self.temp.name) / "trusted-model.pt"
         model.write_bytes(b"synthetic model")
         fake = types.SimpleNamespace(load_model=lambda *a, **k: types.SimpleNamespace(transcribe=lambda *a, **k: {"text": "Synthetic transcript", "language": "en", "segments": []}))
+        self.config.media_policies = {"news.example": {"download": True, "types": ["audio"],
+            "max_file_bytes": 1024, "max_total_bytes": 4096, "min_free_bytes": 0}}
         with self.archive.writer() as archive:
             archive.enqueue(["https://news.example/audio"])
             archive.capture("https://news.example/audio", Response(source, "https://news.example/audio", "audio/wav"))
@@ -143,6 +145,8 @@ class AdapterTests(unittest.TestCase):
     def test_failed_transcription_keeps_original(self):
         source = b"audio fixture"
         digest = hashlib.sha256(source).hexdigest()
+        self.config.media_policies = {"news.example": {"download": True, "types": ["audio"],
+            "max_file_bytes": 1024, "max_total_bytes": 4096, "min_free_bytes": 0}}
         with self.archive.writer() as archive:
             archive.enqueue(["https://news.example/audio"])
             archive.capture("https://news.example/audio", Response(source, "https://news.example/audio", "audio/wav"))

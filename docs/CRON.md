@@ -39,7 +39,9 @@ with `--install` to append it to the current user's readable crontab. The instal
 preserves existing entries and refuses duplicate managed blocks. If no readable
 crontab exists, it stops and asks the operator to initialize it rather than
 silently replacing anything. This repository never installs cron automatically. The generated block does not
-request media extraction/downloads. See the [Termux guide](TERMUX.md) for Android
+grant media download permission. Keep `media_policies` empty for links-first
+collection; adding an explicit source policy allows its selected bounded media
+requests on subsequent ticks. See [media policy](MEDIA.md) and the [Termux guide](TERMUX.md) for Android
 process-lifetime limits before relying on a phone schedule.
 
 The example runs collection every five minutes and includes a commented

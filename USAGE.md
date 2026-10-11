@@ -39,20 +39,24 @@ election26 --archive "$ARCHIVE" status
 election26 --archive "$ARCHIVE" gc
 ```
 
-Default HTML collection keeps embedded media links without following them.
-RSS/Atom enclosure references remain in the original feed and are not queued. A separate per-source media policy and structured link manifest
-are planned; ordinary article/manual URLs are not yet content-type-gated, and
-existing queued items remain pending. Review those inputs before a links-only
-run. Do not use broad media extraction for a phone archive.
+Media links and available type/length metadata are recorded by default. Raw HTML,
+JSON and feed originals preserve their original references. Raw media requires an
+explicit source-host policy with selected types and file/storage budgets. This
+also gates ordinary/manual/article/feed URLs that return media; unknown binary
+responses fail closed before their bodies are read. Known media suffixes are
+recorded without requesting them when not opted in.
 
-The explicit legacy `fetch --extract-media` flag queues direct media links in
-captured HTML. A subsequent
-`fetch` archives those queued objects. This is bounded one-hop extraction, not an
-unrestricted crawler. `fetch URL` queues and captures a specific allowed URL.
-`fetch --refresh URL` records a new observation and preserves previous versions.
-Each invocation processes at most `max_urls` URLs. Failed/pending items are
-retried on the next invocation; completed items are skipped unless refreshed.
+The legacy `--extract-media` flag is accepted for compatibility, but cannot grant
+download permission. HTML references are now recorded regardless of that flag.
+`fetch URL` processes a specific allowlisted URL. `fetch --refresh URL` records a
+new observation and preserves previous versions. Each invocation processes at
+most `max_urls` items, with a rotating bounded media-reference window. Failed or
+pending requests resume on later invocations. Downloaded references are skipped;
+previously not-requested links can be admitted after an explicit config change.
 Interruptions resume at the item boundary, not at a byte offset.
+
+See [media policy and replay](docs/MEDIA.md) before opting in. The empty default
+`media_policies` map is suitable for links-first collection on a phone.
 
 ## Discovery and scope
 
@@ -94,7 +98,9 @@ charges. There is no automatic pagination or paid transcription. An optional
 - `catalog.sqlite`: operational URL queue, capture observations, checkpoints,
   transcript provenance, and notification state. **Not a StarIntel schema.**
 - `manifests/<capture-id>.json`: source/final URL, UTC capture time, SHA-256,
-  byte count, media type/encoding, ETag, and Last-Modified.
+  byte count, response type/encoding, ETag, and Last-Modified.
+- `manifests/media-<observation-id>.json`: versioned media reference, source
+  attribution, declared/response metadata, policy snapshot, and acquisition state.
 - `transcripts/<source-sha256>.json`: local derived result with source/model hash.
 
 Writes stream to a temporary file, hash, fsync, atomically rename, then commit
