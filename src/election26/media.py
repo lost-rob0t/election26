@@ -25,7 +25,7 @@ def content_kind(content_type):
     if mime == "application/pdf":
         return "document"
     # Unknown/binary formats fail closed; never assume that an opaque URL is text.
-    if (mime.startswith("text/") or mime in {"application/json", "application/xml",
+    if (mime.startswith("text/") or mime in {"application/json", "application/javascript", "application/ecmascript", "application/xml",
             "application/rss+xml", "application/atom+xml", "application/xhtml+xml"}
             or mime.endswith(("+json", "+xml"))):
         return None

@@ -214,3 +214,10 @@ contract. Whisper model inference remains untested. Raw originals always survive
 - [OpenAI Whisper](https://github.com/openai/whisper)
 - [Discord webhook execution](https://discord.com/developers/docs/resources/webhook#execute-webhook)
 - [Python SQLite backup](https://docs.python.org/3/library/sqlite3.html#sqlite3.Connection.backup)
+
+## Optional isolated browser capture
+
+Linux operators can opt into one-URL rendered capture with separately preserved
+original HTML, rendered DOM and observed JSON. See [BROWSER.md](docs/BROWSER.md)
+for the mandatory namespace/sandbox requirements, runtime build and limits.
+Native Termux and macOS browser capture are unsupported; ordinary raw HTTP is unchanged.

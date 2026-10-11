@@ -265,7 +265,7 @@ class Archive(MediaCatalog):
         finally:
             temp.unlink(missing_ok=True)
 
-    def capture(self, url, response, source_url=None, reference=None, max_bytes=None):
+    def capture(self, url, response, source_url=None, reference=None, max_bytes=None, browser_request_id=None):
         url = self.config.permit(url)
         final_url = self.config.permit(response.url)
         source_url = source_url or (reference["source_url"] if reference else url)
@@ -304,6 +304,9 @@ class Archive(MediaCatalog):
                 "VALUES (:url,:final_url,:captured_at,:sha256,:bytes,:content_type,:etag,:last_modified,:content_encoding,:source_url,:media_reference_id,:format_version)", record)
             self.db.execute("UPDATE resources SET state='done',error=NULL WHERE url=?", (url,))
             record["id"] = cursor.lastrowid
+            if browser_request_id is not None:
+                from .browser_catalog import original
+                original(self, browser_request_id, record)
             event = self.media_event(reference, "downloaded", capture=record, response=response, transactional=True) if reference else None
         try:
             atomic_json(self.root / "manifests" / (str(record["id"]) + ".json"), record)
@@ -351,7 +354,7 @@ class Archive(MediaCatalog):
         if remaining <= 0:
             return results
         query = "SELECT url,source_url,via FROM resources"
-        conditions = [] if urls else ["via!='policy-media'"]
+        conditions = [] if urls else ["via NOT IN ('policy-media','browser')"]
         params = []
         if not refresh:
             conditions.append("state IN ('pending','failed','not_requested')" if urls else "state IN ('pending','failed')")
@@ -421,6 +424,8 @@ class Archive(MediaCatalog):
         return results
 
     def repair_manifests(self):
+        from .browser_catalog import repair
+        repair(self)
         for row in self.db.execute("SELECT * FROM captures"):
             path = self.root / "manifests" / (str(row["id"]) + ".json")
             if not path.exists():
@@ -465,12 +470,19 @@ def status(root):
     with contextlib.closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db, db:
         db.execute("BEGIN")  # All counters come from the same committed snapshot.
         rows = db.execute("SELECT sha256, MAX(bytes) FROM captures GROUP BY sha256").fetchall()
+        browser = db.execute("SELECT 1 FROM sqlite_master WHERE name='browser_artifacts'").fetchone()
+        all_objects = dict(rows)
+        if browser:
+            for digest, size in db.execute("SELECT sha256,MAX(bytes) FROM browser_artifacts GROUP BY sha256"):
+                all_objects[digest] = max(all_objects.get(digest, 0), size)
         return {
+            "browser_sessions": db.execute("SELECT COUNT(*) FROM browser_sessions").fetchone()[0] if browser else 0,
+            "browser_artifacts": db.execute("SELECT COUNT(*) FROM browser_artifacts").fetchone()[0] if browser else 0,
             "initialized": True,
             "capture_observations": db.execute("SELECT COUNT(*) FROM captures").fetchone()[0],
-            "unique_objects": len(rows),
+            "unique_objects": len(all_objects),
             "original_bytes": db.execute("SELECT COALESCE(SUM(bytes),0) FROM captures").fetchone()[0],
-            "stored_object_bytes": sum(r[1] for r in rows),
+            "stored_object_bytes": sum(all_objects.values()),
             "canonical_documents": db.execute("SELECT COUNT(*) FROM normalizations").fetchone()[0] if db.execute("SELECT 1 FROM sqlite_master WHERE name='normalizations'").fetchone() else 0,
             "transcripts": db.execute("SELECT COUNT(*) FROM transcripts").fetchone()[0],
             "errors": db.execute("SELECT COUNT(*) FROM resources WHERE state='failed'").fetchone()[0],
@@ -494,6 +506,9 @@ def gc_plan(archive):
                 and sha256_file(source) == row["sha256"]):
             candidates.append(row["sha256"])
     known = {r[0] for r in archive.db.execute("SELECT DISTINCT sha256 FROM captures")}
+    from .browser_catalog import exists
+    if exists(archive.db):
+        known.update(r[0] for r in archive.db.execute("SELECT DISTINCT sha256 FROM browser_artifacts"))
     orphans = [p.name for p in (archive.root / "objects").glob("*/*") if p.is_file() and p.name not in known]
     return {"dry_run": True, "deletion_supported": False,
             "raw_candidates_after_human_review": candidates, "orphan_objects": orphans,
