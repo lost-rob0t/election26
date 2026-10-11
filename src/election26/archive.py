@@ -275,6 +275,10 @@ class Archive(MediaCatalog):
         for name in ("content-type", "etag", "last-modified", "content-encoding", "content-length"):
             if len(response.headers.get(name, "").encode("utf-8")) > 1024:
                 raise PolicyError("Source metadata exceeds the per-field limit")
+        if browser_request_id is not None:
+            csp = response.headers.get('content-security-policy', '')
+            if len(csp.encode()) > 8192 or any(ord(c) < 32 and c != '\t' for c in csp):
+                raise PolicyError('Source content security policy exceeds browser metadata limits')
         policy = None
         if reference or content_kind(response.headers.get("content-type")) or url_kind(url) or url_kind(final_url):
             reference = reference or self.media_reference(url, source_url, kind_hint=url_kind(url))
@@ -306,7 +310,7 @@ class Archive(MediaCatalog):
             record["id"] = cursor.lastrowid
             if browser_request_id is not None:
                 from .browser_catalog import original
-                original(self, browser_request_id, record)
+                original(self, browser_request_id, record, response)
             event = self.media_event(reference, "downloaded", capture=record, response=response, transactional=True) if reference else None
         try:
             atomic_json(self.root / "manifests" / (str(record["id"]) + ".json"), record)

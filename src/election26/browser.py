@@ -141,6 +141,10 @@ def send_message(stream, value, limit):
     stream.flush()
 
 
+def reject_json_constant(value):
+    raise ValueError('Nonfinite JSON constant')
+
+
 class EmbeddedJSON(HTMLParser):
     def __init__(self, limits):
         super().__init__(convert_charrefs=False)
@@ -170,7 +174,7 @@ class EmbeddedJSON(HTMLParser):
             text = ''.join(self.active)
             self.active = None
             try:
-                json.loads(text)
+                json.loads(text, parse_constant=reject_json_constant)
             except (ValueError, RecursionError):
                 self.omitted += 1
                 return
@@ -265,7 +269,7 @@ class Broker:
             catalog.request_finish(self.archive, request_id, 'captured', status=200)
             # Security restrictions alter execution, never the archived original.
             headers = {'content-type': record['content_type'],
-                       'content-security-policy': "frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"}
+                       'content-security-policy': catalog.intersect_csp(response.headers.get('content-security-policy'))}
             return {'state': 'fulfilled', 'body': base64.b64encode(body).decode(), 'headers': headers}
         except Exception as exc:
             self.blocked += 1
@@ -282,7 +286,10 @@ class Broker:
             raise PolicyError('Rendered DOM exceeds limit')
         self.dom = catalog.derived(self.archive, self.session_id, 'rendered_dom', body, parent=self.initial,
                                    metadata={'url': self.url, 'derived': True, 'renderer': 'Playwright Chromium',
-                                             'policy': 'no frames/workers/popups/downloads/POST/WebSocket/EventSource; broker-only resources'})
+                                             'policy': 'no frames/workers/popups/downloads/POST/WebSocket/EventSource; broker-only resources',
+                                             'forwarded_response_headers': ['content-type', 'content-security-policy'],
+                                             'omitted_response_headers': 'all others, including nosniff, CORS, COOP, COEP, CORP and Content-Disposition',
+                                             'fidelity': 'bounded broker replay; header omissions can change execution compared with a source browser'})
         self.omissions += embedded(self.archive, self.session_id, self.dom, body,
                                    'embedded_json_rendered', self.limits)
 
@@ -381,21 +388,42 @@ def _supervise(archive_root, config, url, limits, session_id, command, spec):
         established = False
     finally:
         receiver.close()
+    owned = True
     try:
         if established:
-            worker.join(min(limits.seconds, config.max_run_seconds) + 3)
+            wait_unreaped(worker.pid, min(limits.seconds, config.max_run_seconds) + 3)
+    except ChildProcessError:
+        # An external SIGCHLD handler reaped it; never signal a recycled number.
+        owned = False
     finally:
-        if established:
-            # Kill the group even if its leader exited: Chromium may still remain.
+        if owned and established:
+            # Leader is still alive or a retained zombie, so its PID/PGID cannot
+            # be recycled between observing exit and signaling our process group.
             try:
                 os.killpg(worker.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-        elif worker.is_alive():
-            worker.kill()
-        worker.join(5)
+        elif owned:
+            try:
+                os.kill(worker.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        worker.join(5)  # Reap ONLY AFTER owned group termination.
     with Archive(archive_root, config).writer() as archive:
         state = archive.db.execute('SELECT state FROM browser_sessions WHERE id=?', (session_id,)).fetchone()[0]
         if state == 'running':
             return catalog.finish(archive, session_id, 'partial', 'process_deadline_or_crash')
         return catalog.save_manifest(archive, session_id)
+
+
+def wait_unreaped(pid, seconds):
+    """Wait for our child without releasing its PID before group cleanup."""
+    deadline = time.monotonic() + seconds
+    while True:
+        event = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        if event is not None:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(remaining, 0.05))

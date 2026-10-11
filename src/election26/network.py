@@ -76,7 +76,12 @@ class Response:
         self.deadline = deadline
         self.url = url
         self.status = response.status
-        self.headers = {k.lower(): v for k, v in response.getheaders()}
+        raw_headers = response.getheaders()
+        self.headers = {k.lower(): v for k, v in raw_headers}
+        # Multiple enforcing CSP fields are an intersection, not last-wins.
+        policies = [value for name, value in raw_headers if name.lower() == 'content-security-policy']
+        if policies:
+            self.headers['content-security-policy'] = ', '.join(policies)
 
     def chunks(self):
         total = 0

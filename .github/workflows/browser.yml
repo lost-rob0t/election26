@@ -40,7 +40,7 @@ jobs:
           # No namespace/security policy is disabled; no privileged container.
           sudo systemd-run --wait --pipe --collect --uid="$(id -u)" \
             -p MemoryMax=1G -p MemorySwapMax=0 -p TasksMax=256 \
-            -p RuntimeMaxSec=180 -p KillMode=control-group \
+            -p RuntimeMaxSec=180 -p KillMode=control-group -p OOMPolicy=continue \
             -p "WorkingDirectory=$GITHUB_WORKSPACE" \
             --setenv="PATH=$PATH" \
             "$(command -v python)" scripts/ci-browser-fixture.py "$RUNNER_TEMP/election26-browser-runtime"

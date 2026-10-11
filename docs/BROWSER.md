@@ -81,9 +81,13 @@ Chromium's sandbox remains enabled. No weaker fallback exists.
 
 Service workers, other workers, child frames, extra navigations, popups,
 downloads, permissions, POST, WebSocket and EventSource are disabled or rejected.
-Security CSP is added only to the renderer's fulfillment; archived response
-bytes are unchanged. These restrictions and omitted CORS response headers can
-prevent a site from rendering correctly. Completion means the bounded observation
+The source's bounded enforcing CSP headers are intersected with an additional
+restrictive CSP only for renderer fulfillment; their source/applied policies are
+recorded with original-response provenance. Archived body bytes are unchanged. Only Content-Type and the intersected enforcing CSP are supplied to the
+renderer. All other response headers, including nosniff, CORS, COOP/COEP/CORP
+and Content-Disposition, are omitted, as recorded on the DOM artifact. These
+omissions can change execution, not merely block it; the snapshot is a bounded
+broker replay rather than a claim of source-browser equivalence. Completion means the bounded observation
 ended, not that all content or future network activity was captured.
 
 ## Evidence and limits

@@ -6,6 +6,13 @@ from .archive import atomic_json, now, sha256_file
 from .config import PolicyError
 
 
+RENDERER_CSP = "frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+
+
+def intersect_csp(source):
+    return source + ', ' + RENDERER_CSP if source else RENDERER_CSP
+
+
 def exists(db):
     return bool(db.execute("SELECT 1 FROM sqlite_master WHERE name='browser_sessions'").fetchone())
 
@@ -62,12 +69,14 @@ def request_finish(archive, request_id, state, reason=None, status=None):
                            (now(), state, reason, status, request_id))
 
 
-def original(archive, request_id, record):
+def original(archive, request_id, record, response):
     """Called INSIDE Archive.capture's transaction: no detached originals."""
     row = archive.db.execute('SELECT session_id FROM browser_requests WHERE id=?', (request_id,)).fetchone()
     if not row:
         raise PolicyError('Unknown browser request')
-    metadata = {'response_status': 200, 'url': record['url'], 'final_url': record['final_url'],
+    metadata = {'source_content_security_policy': response.headers.get('content-security-policy'),
+                'rendered_content_security_policy': intersect_csp(response.headers.get('content-security-policy')),
+                'response_status': 200, 'url': record['url'], 'final_url': record['final_url'],
                 'content_type': record['content_type'], 'content_encoding': record['content_encoding'],
                 'source_last_modified': record['last_modified'], 'etag': record['etag'],
                 'source_timestamp_semantics': 'unverified HTTP Last-Modified header',

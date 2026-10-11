@@ -36,15 +36,29 @@ JS = b'''addEventListener('DOMContentLoaded', async () => {
 
 class Raw:
     status = 200
-    def __init__(self, body, mime):
+    def __init__(self, body, mime, policy=None):
         self.body = io.BytesIO(body)
         self.mime = mime
+        self.policy = policy
     def getheaders(self):
-        return [('Content-Type', self.mime), ('Set-Cookie', 'must-not-leave-broker=fixture')]
+        headers = [('Content-Type', self.mime), ('Set-Cookie', 'must-not-leave-broker=fixture')]
+        if self.policy:
+            headers.append(('Content-Security-Policy', self.policy))
+        return headers
     def read(self, n):
         return self.body.read(n)
     def close(self):
         pass
+
+
+class SourceCSPHTTP:
+    def __init__(self, config, **kwargs):
+        pass
+    @contextlib.contextmanager
+    def open(self, url):
+        assert url == URL
+        body = b'<html><p id="result">original</p><script>document.getElementById("result").textContent="forbidden";</script></html>'
+        yield Response(Raw(body, 'text/html', "script-src 'none'"), None, url)
 
 
 class MemoryPressureHTTP:
@@ -107,15 +121,19 @@ with sync_playwright() as p:
  page.goto('chrome://sandbox')
  page.wait_for_function("document.querySelectorAll('#sandbox-status tr').length > 0", timeout=3000)
  summary = page.locator('body').inner_text()
- print(json.dumps({{'sandbox_diagnostics': summary}}), flush=True)
  rows = dict(page.locator('#sandbox-status tr').evaluate_all('(rows) => rows.map(r => Array.from(r.cells, c => c.textContent))'))
+ print(json.dumps({{'sandbox_rows': rows}}), flush=True)
  assert rows.get('Seccomp-BPF sandbox') == 'Yes', 'Chromium seccomp sandbox evidence missing'
  assert rows.get('Layer 1 Sandbox') == 'Namespace', 'Chromium namespace sandbox evidence missing'
  from pathlib import Path
  renderer_status=[]
  for directory in Path('/proc').glob('[0-9]*'):
   try:
-   if b'--type=renderer' not in (directory/'cmdline').read_bytes().split(b'\\0'):
+   arguments = (directory/'cmdline').read_bytes().replace(bytes([0]), b' ').split()
+   if not arguments or arguments[0] != {spec['chromium'].encode()!r}:
+    continue
+   print(json.dumps({{'chromium_process_args': [a.decode(errors='replace')[:120] for a in arguments[:6]]}}), flush=True)
+   if b'--type=renderer' not in arguments:
     continue
    fields=dict(line.split(':',1) for line in (directory/'status').read_text().splitlines() if ':' in line)
    assert fields.get('Seccomp','').strip() == '2'
@@ -189,6 +207,15 @@ finally:
         assert partial['state'] == 'partial'
         assert any(a['role'] == 'original_response' for a in partial['artifacts'])
         assert not any(a['role'] == 'rendered_dom' for a in partial['artifacts'])
+        # Source restrictions must stay effective after broker fulfillment.
+        with patch('election26.browser.PublicHTTP', SourceCSPHTTP):
+            restricted = capture_browser(root/'source-csp', config, URL, runtime, BrowserLimits(seconds=15))
+        assert restricted['state'] == 'complete'
+        with Archive(root/'source-csp', config).writer() as archive:
+            dom = next(a for a in restricted['artifacts'] if a['role'] == 'rendered_dom')
+            assert b'<p id="result">original</p>' in archive.object_path(dom['sha256']).read_bytes()
+            original = next(a for a in restricted['artifacts'] if a['role'] == 'original_response')
+            assert original['metadata']['source_content_security_policy'] == "script-src 'none'"
         # ArrayBuffer allocations are outside the V8 old-space heap cap. Prove
         # the cgroup kills their renderer while committed originals survive.
         before_oom = int(memory_events()['oom_kill'])
@@ -199,7 +226,7 @@ finally:
         assert int(memory_events()['oom_kill']) > before_oom, 'No kernel memory enforcement evidence'
         print(json.dumps({'secure_browser_fixture': 'passed', 'original_unchanged': True,
                           'javascript_and_json_rendered': True, 'derived_relationships': len(roles),
-                          'oversize_dom_retains_original': True, 'kernel_memory_limit': True, 'kernel_tasks_limit': True}))
+                          'oversize_dom_retains_original': True, 'kernel_memory_limit': True, 'kernel_tasks_limit': True, 'source_csp_enforced': True}))
 
 
 if __name__ == '__main__':

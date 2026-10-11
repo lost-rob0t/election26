@@ -313,7 +313,11 @@ class BrokerLifecycleTests(unittest.TestCase):
             deadline = time.monotonic()+3
             while time.monotonic() < deadline:
                 path = Path('/proc')/str(broker_pid)/'stat'
-                if not path.exists() or path.read_text().split()[2] == 'Z':
+                try:
+                    state = path.read_text().split()[2]
+                except (FileNotFoundError, ProcessLookupError):
+                    break
+                if state == 'Z':
                     break
                 time.sleep(0.02)
             else:
@@ -341,3 +345,48 @@ class BrokerLifecycleTests(unittest.TestCase):
                 recovered = catalog.manifest(archive, session)
                 self.assertEqual(recovered['state'], 'partial')
                 self.assertEqual(recovered['reason'], 'supervisor_interrupted')
+
+class BrowserReviewRegressionTests(unittest.TestCase):
+    def test_nonfinite_embedded_json_is_not_claimed_valid(self):
+        for constant in ['NaN', 'Infinity', '-Infinity']:
+            parser = EmbeddedJSON(BrowserLimits())
+            parser.feed('<script type="application/json">{"number":' + constant + '}</script>')
+            self.assertEqual(parser.blocks, [])
+            self.assertEqual(parser.omitted, 1)
+
+    def test_duplicate_source_csp_is_intersected_and_retained(self):
+        class Headers(Raw):
+            def getheaders(self):
+                return [('Content-Type', 'text/html'), ('Content-Security-Policy', "script-src 'none'"),
+                        ('content-security-policy', "connect-src 'none'")]
+        response = Response(Headers(body=HTML), None, URL)
+        combined = catalog.intersect_csp(response.headers['content-security-policy'])
+        self.assertEqual(combined, "script-src 'none', connect-src 'none', " + catalog.RENDERER_CSP)
+        with tempfile.TemporaryDirectory() as tmp, patch('election26.archive.inside_git_checkout', return_value=False):
+            config = Config(allowed_hosts=['fixture.example'], min_free_bytes=0)
+            with Archive(Path(tmp)/'archive', config).writer() as archive:
+                session = catalog.start(archive, URL, {})
+                request_id = catalog.request_start(archive, session, URL, 'document')
+                archive.enqueue([URL], via='browser')
+                archive.capture(URL, response, browser_request_id=request_id)
+                metadata = catalog.manifest(archive, session)['artifacts'][0]['metadata']
+                self.assertEqual(metadata['source_content_security_policy'], "script-src 'none', connect-src 'none'")
+                self.assertEqual(metadata['rendered_content_security_policy'], combined)
+
+    @unittest.skipUnless(sys.platform == 'linux' and 'ANDROID_ROOT' not in os.environ, 'Native Linux waitid')
+    def test_wait_keeps_child_unreaped_until_group_signal(self):
+        from election26.browser import wait_unreaped
+        import signal
+        pid = os.fork()
+        if pid == 0:
+            os.setsid()
+            os._exit(0)
+        try:
+            wait_unreaped(pid, 2)
+            # WNOWAIT leaves the exact leader waitable and its PID reserved.
+            again = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+            self.assertIsNotNone(again)
+            self.assertEqual(again.si_pid, pid)
+            os.killpg(pid, signal.SIGKILL)
+        finally:
+            os.waitpid(pid, 0)
