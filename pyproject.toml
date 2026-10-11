@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "election26"
+version = "0.1.0"
+description = "Local-first, bounded public-source multimedia archive pipeline"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+whisper = ["openai-whisper==20250625"]
+keyring = ["keyring>=25,<26"]
+
+[project.scripts]
+election26 = "election26.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
