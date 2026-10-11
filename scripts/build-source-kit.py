@@ -17,8 +17,12 @@ SPEC.loader.exec_module(guard)
 def build(root, output, commit):
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("Provide the exact reviewed 40-character source commit")
-    root, output = Path(root).resolve(), Path(output).absolute()
-    if output == root or root in output.parents or output.exists() or output.is_symlink():
+    root, output = Path(root).resolve(), Path(output).expanduser()
+    if output.exists() or output.is_symlink():
+        raise ValueError("Output must be a new ZIP outside the source tree")
+    output = output.resolve()  # Normalize ../ before checking source containment.
+    checksum = output.with_suffix(output.suffix + ".sha256")
+    if output == root or root in output.parents or checksum.exists() or checksum.is_symlink():
         raise ValueError("Output must be a new ZIP outside the source tree")
     paths = json.loads((root / "source-kit-files.json").read_text())
     if not isinstance(paths, list) or not paths or len(paths) != len(set(paths)):
@@ -52,7 +56,8 @@ def build(root, output, commit):
             info.external_attr = 0o100644 << 16
             bundle.writestr(info, data)
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
-    output.with_suffix(output.suffix + ".sha256").write_text(digest + "  " + output.name + "\n")
+    with checksum.open("x") as handle:
+        handle.write(digest + "  " + output.name + "\n")
     return {"zip": str(output), "sha256": digest, "entries": len(files), "source_commit": commit}
 
 

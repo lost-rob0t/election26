@@ -102,6 +102,26 @@ def save_state(archive, state):
         archive.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (STATE_KEY, json.dumps(state)))
 
 
+def unfinished_media(archive):
+    """Count admitted work not necessarily present in the ordinary URL queue."""
+    pending = failed = 0
+    if not any(policy.get("download") for policy in archive.config.media_policies.values()):
+        return pending, failed
+    for reference in archive.db.execute("SELECT * FROM media_references ORDER BY id"):
+        previous = archive.db.execute("SELECT payload FROM media_observations WHERE reference_id=? ORDER BY id DESC LIMIT 1",
+                                      (reference["id"],)).fetchone()
+        outcome = json.loads(previous[0])["state"] if previous else None
+        if outcome == "downloaded":
+            continue
+        policy, _ = archive.reference_admission(reference)
+        if policy:
+            if outcome == "unavailable":
+                failed += 1
+            else:
+                pending += 1
+    return pending, failed
+
+
 def run_batch(archive, client, report=emit):
     """Discover one complete selected rotation, then drain one bounded fetch pass.
 
@@ -142,9 +162,14 @@ def run_batch(archive, client, report=emit):
     # At most one core fetch call per command, so failed sources are not hot-looped.
     fetched = archive.fetch(client)
     summary = status(archive.root)
-    pending = sum(summary["queue"].get(key, 0) for key in ("pending", "running"))
-    deferred = deferred or bool(pending) or any(item["state"] == "deferred" for item in fetched)
-    failures = state["source_errors"] + summary["errors"] + sum(item["state"] == "failed" for item in fetched)
+    # Core media fetch keeps its URL row pending after an unavailable observation;
+    # the media outcome, not that row, decides retry/error semantics. Browser work
+    # is also outside the ordinary fetch queue this kit can drain.
+    pending = archive.db.execute("SELECT COUNT(*) FROM resources WHERE state IN ('pending','running') "
+                                 "AND via NOT IN ('policy-media','browser')").fetchone()[0]
+    pending_media, failed_media = unfinished_media(archive)
+    deferred = deferred or bool(pending or pending_media) or any(item["state"] == "deferred" for item in fetched)
+    failures = state["source_errors"] + summary["errors"] + failed_media + sum(item["state"] == "failed" for item in fetched)
     # A failed source is an attempted rotation, not a successful archive. Permit a
     # fresh discovery cycle next time once this cycle's pending queue is drained.
     state["complete"] = state["manual_done"] and state["feeds_left"] == 0 and not deferred
@@ -153,6 +178,7 @@ def run_batch(archive, client, report=emit):
     report("batch_finished", exit_code=code, rotation_complete=state["complete"],
            source_errors=state["source_errors"], requests=client.request_count,
            source_deferred=state["source_deferred"],
+           pending_media=pending_media, failed_media=failed_media,
            feeds_left=state["feeds_left"], status=summary)
     return code
 
@@ -178,23 +204,60 @@ def worker(archive_path, config_path, query=None):
 
 
 def supervise(command, seconds):
-    child = subprocess.Popen(command, start_new_session=True)
+    from .browser import wait_unreaped
+    stopped = False
+    def stop(signum, frame):
+        nonlocal stopped
+        # Do not raise through Popen's fork/exec window before child is assigned.
+        stopped = True
+    signals = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    previous = {signum: signal.getsignal(signum) for signum in signals}
+    child = None
+    owned = True
+    outcome = "interrupted"
+    result = 75
     try:
-        result = child.wait(timeout=seconds)
-        return result if result >= 0 else 75
-    except (subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
-        # TERM then KILL bounds blocked DNS too; descendants share this group.
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(child.pid, signal.SIGTERM)
-        try:
-            child.wait(timeout=3)
-        except subprocess.TimeoutExpired:
+        for signum in signals:
+            signal.signal(signum, stop)
+        child = subprocess.Popen(command, start_new_session=True)
+        deadline = time.monotonic() + seconds
+        while not stopped:
+            event = os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+            if event is not None:
+                outcome = "finished"
+                result = event.si_status if event.si_code == os.CLD_EXITED else 75
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                outcome = "deadline"
+                break
+            time.sleep(min(0.05, remaining))
+    except ChildProcessError:
+        # An external SIGCHLD handler reaped it. Never signal a recycled PGID.
+        owned = False
+    finally:
+        # Repeated terminal signals cannot interrupt cleanup. Retain the process
+        # leader until every group signal has been sent, then reap exactly once.
+        for signum in signals:
+            signal.signal(signum, signal.SIG_IGN)
+        if child is not None and owned:
+            if outcome != "finished":
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(child.pid, signal.SIGTERM)
+                try:
+                    wait_unreaped(child.pid, 3)
+                except ChildProcessError:
+                    owned = False
+            # Kill remaining descendants even after the leader exited normally.
+        if child is not None and owned:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(child.pid, signal.SIGKILL)
             child.wait()
-        emit("interrupted" if isinstance(exc, KeyboardInterrupt) else "deadline",
-             exit_code=75, notice="Committed data retained. Rerun the same command to resume.")
-        return 75
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+    if outcome != "finished":
+        emit(outcome, exit_code=75, notice="Committed data retained. Rerun the same command to resume.")
+    return result
 
 
 def main(argv=None):

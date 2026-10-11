@@ -61,6 +61,7 @@
   "tests/test_network.py",
   "tests/test_public_tree.py",
   "tests/test_sdk_integration.py",
+  "tests/test_source_kit.py",
   "tests/test_spool_import.py",
   "tests/test_sqlite_lifetime.py",
   "tests/test_termux_install.py"

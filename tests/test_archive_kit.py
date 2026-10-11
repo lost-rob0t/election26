@@ -188,6 +188,95 @@ class ArchiveKitTests(unittest.TestCase):
         self.assertEqual(code, 75)
         self.assertLess(time.monotonic() - start, 5)
 
+    def test_supervisor_terminal_signals_do_not_orphan_child(self):
+        # Real processes, synthetic sleeping child. No sockets or live collection.
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            marker = self.cwd / ("child-" + str(signum))
+            child_code = "import os,time,pathlib; pathlib.Path(" + repr(str(marker)) + ").write_text(str(os.getpid())); time.sleep(60)"
+            supervisor_code = "import sys; from election26.kit import supervise; sys.exit(supervise([sys.executable,'-c'," + repr(child_code) + "],1))"
+            supervisor = subprocess.Popen([sys.executable, "-c", supervisor_code],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            deadline = time.monotonic() + 10
+            while not marker.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(marker.exists())
+            child_pid = int(marker.read_text())
+            try:
+                supervisor.send_signal(signum)
+                supervisor.communicate(timeout=5)
+                self.assertEqual(supervisor.returncode, 75)
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(child_pid, 0)
+            finally:
+                if supervisor.poll() is None:
+                    supervisor.kill()
+                    supervisor.wait()
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(child_pid, signal.SIGKILL)
+
+    def test_unattempted_opt_in_media_reports_deferred_until_next_run(self):
+        self.config.feeds = []
+        self.config.manual_urls = ["https://news.example/page"]
+        self.config.allowed_hosts.append("media.example")
+        self.config.max_urls = 1
+        self.config.media_policies = {"news.example": {"download": True, "types": ["image"],
+            "max_file_bytes": 1000, "max_total_bytes": 10000, "min_free_bytes": 0}}
+        class MediaHTTP(FixtureHTTP):
+            def open(self, url):
+                response = super().open(url)
+                return Response(b"synthetic image", url, "image/jpeg") if url.endswith(".jpg") else response
+        with Archive(self.cwd / "archive", self.config).writer() as archive:
+            self.assertEqual(kit.run_batch(archive, MediaHTTP(self.config), self.report), 75)
+            self.assertEqual(self.events[-1]["pending_media"], 1)
+            self.assertEqual(kit.run_batch(archive, MediaHTTP(self.config), self.report), 0)
+            self.assertEqual(self.events[-1]["pending_media"], 0)
+            self.assertEqual(archive.db.execute("SELECT COUNT(*) FROM captures WHERE media_reference_id IS NOT NULL").fetchone()[0], 1)
+
+    def test_failed_opt_in_media_does_not_starve_future_feed_rotations(self):
+        self.config.feeds = ["https://news.example/feed1"]
+        self.config.manual_urls = ["https://news.example/page"]
+        self.config.allowed_hosts.append("media.example")
+        self.config.max_urls = 1
+        self.config.max_requests = 20
+        self.config.media_policies = {"news.example": {"download": True, "types": ["image"],
+            "max_file_bytes": 1000, "max_total_bytes": 10000, "min_free_bytes": 0}}
+        class UnavailableMediaHTTP(FixtureHTTP):
+            def open(self, url):
+                response = super().open(url)
+                if url.endswith(".jpg"):
+                    raise OSError("Synthetic unavailable media")
+                return Response(b"<rss/>", url) if "/feed" in url else response
+        with Archive(self.cwd / "archive", self.config).writer() as archive:
+            self.assertEqual(kit.run_batch(archive, UnavailableMediaHTTP(self.config), self.report), 75)
+            self.assertEqual(kit.run_batch(archive, UnavailableMediaHTTP(self.config), self.report), 1)
+            self.assertTrue(self.events[-1]["rotation_complete"])
+            self.assertEqual(self.events[-1]["failed_media"], 1)
+            client = UnavailableMediaHTTP(self.config)
+            self.assertEqual(kit.run_batch(archive, client, self.report), 1)
+            self.assertIn("https://news.example/feed1", client.calls)
+
+    def test_supervisor_signals_owned_group_before_reaping(self):
+        import types
+        event = types.SimpleNamespace(si_status=0, si_code=os.CLD_EXITED)
+        with patch("election26.browser.wait_unreaped"), patch.object(kit.os, "waitid", return_value=event), \
+                patch.object(kit.subprocess, "Popen") as popen, patch.object(kit.os, "killpg") as killpg:
+            child = popen.return_value
+            child.pid = 12345
+            sequence = []
+            killpg.side_effect = lambda *args: sequence.append("signal")
+            child.wait.side_effect = lambda: sequence.append("reap")
+            self.assertEqual(kit.supervise(["synthetic"], 1), 0)
+            self.assertEqual(sequence, ["signal", "reap"])
+            child.poll.assert_not_called()
+
+    def test_supervisor_never_signals_after_external_reap(self):
+        with patch.object(kit.os, "waitid", side_effect=ChildProcessError), \
+                patch.object(kit.subprocess, "Popen") as popen, patch.object(kit.os, "killpg") as killpg, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(kit.supervise(["synthetic"], 1), 75)
+            killpg.assert_not_called()
+            popen.return_value.wait.assert_not_called()
+
     def test_offline_setup_failure_does_not_start_collection(self):
         text = (ROOT / "start-archive.sh").read_text()
         self.assertIn('if ! bash "$root/scripts/install-termux.sh" --install --if-needed', text)

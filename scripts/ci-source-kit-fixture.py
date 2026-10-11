@@ -35,6 +35,29 @@ def main():
             "allowed_hosts": [], "max_requests": 2, "max_run_seconds": 10}))
         original = config.read_bytes()
         command = ["bash", "./start-archive.sh"]
+        # Shared storage is never redirected to HOME. Do not grant a permission
+        # just to reach it; if Android denies traversal, record that separately.
+        checked_shared = False
+        for shared in (Path("/sdcard"), Path("/storage/emulated/0"), Path("/storage")):
+            try:
+                result = subprocess.run(["bash", str(extracted / "start-archive.sh")], cwd=shared,
+                    capture_output=True, text=True, timeout=10)
+            except (PermissionError, FileNotFoundError):
+                continue
+            assert result.returncode == 2 and '"ready"' not in result.stdout
+            assert "Refusing a symlink or non-private launch path" in result.stderr
+            print("ANDROID_TERMUX_SHARED_PATH_REFUSED: " + str(shared))
+            checked_shared = True
+            break
+        assert checked_shared, "No readable Android shared-storage path available for refusal proof"
+        alias = work / "home alias"
+        alias.symlink_to(extracted, target_is_directory=True)
+        result = subprocess.run(["bash", str(extracted / "start-archive.sh")], cwd=alias,
+            env={**os.environ, "PWD": str(alias)}, capture_output=True, text=True, timeout=10)
+        assert result.returncode == 2 and '"ready"' not in result.stdout
+        assert "Refusing a symlink or non-private launch path" in result.stderr
+        assert not (extracted / "archive").exists()
+        print("ANDROID_TERMUX_SYMLINK_ALIAS_REFUSED")
         # The exact delivered command is run twice from the extracted source root.
         # Empty allowlists/sources prove setup/launch/resume without live acquisition.
         for _ in range(2):

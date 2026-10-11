@@ -53,7 +53,7 @@ acquisition timer. Disk limits default to a 2 GiB archive, 16 MiB per ordinary f
 and a 1 GiB free-space reserve. Feed parsing has the existing 4 MiB cap.
 
 Progress is printed as JSON events: ready paths/limits, each RSS discovery result,
-remaining feed turns, then queue and archive counters. The command first queues
+remaining feed turns, then queue, pending/failed opt-in media and archive counters. The command first queues
 manual references and visits rotating feeds, then makes at most one core fetch pass
 (up to 120 URLs, further limited by the shared time/request/disk budgets). A large
 initial queue will require more than one command. It never loops forever.
@@ -79,6 +79,10 @@ work. A partial feed attempt never turns into a success merely because the curso
 moved on. An exit `0` does not mean every URL on the internet, feed history, manual
 link target or linked media body was archived. No command automatically deletes
 old captures. Retention is a review/dry-run setting, not automatic deletion.
+
+Ctrl-C, terminal hangup and normal termination also stop the acquisition child and
+preserve committed data. Force-killing the supervisor or device power loss cannot
+run cleanup; the catalog recovers interrupted operations on the next command.
 
 ## Private files and optional commands
 
