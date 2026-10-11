@@ -19,12 +19,13 @@ assert actual == expected[0], 'Official APK checksum mismatch'
 print('Official Termux APK SHA256:', actual)
 PY
 adb install "$work/$asset"
+adb logcat -c # disposable fresh-emulator logs only
 adb shell am start -n com.termux/.app.TermuxActivity
 # Pinned TermuxInstaller.java emits this only AFTER successful second stage.
 # bash/HOME presence alone is insufficient and could race bootstrap package work.
 ready=false
 for attempt in $(seq 1 120); do
-  if adb logcat -d -s 'Termux:TermuxInstaller:I' '*:S' | grep -F 'Bootstrap packages installed successfully.' >/dev/null &&
+  if adb logcat -d -v tag '*:I' | grep -Fx 'I/Termux:TermuxInstaller: Bootstrap packages installed successfully.' >/dev/null &&
      adb shell run-as com.termux test -x /data/data/com.termux/files/usr/bin/bash &&
      adb shell run-as com.termux test -d /data/data/com.termux/files/home; then
     ready=true

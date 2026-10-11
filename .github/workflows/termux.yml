@@ -27,5 +27,5 @@ jobs:
           arch: x86_64
           disk-size: 4096M
           emulator-boot-timeout: 600
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -no-metrics
           script: bash scripts/ci-termux-host.sh
