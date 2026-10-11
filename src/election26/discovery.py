@@ -4,7 +4,7 @@ import json
 from urllib.parse import urljoin, urlencode
 import xml.etree.ElementTree as ET
 
-from .config import PolicyError, canonical_url, credential
+from .config import PolicyError, BudgetError, canonical_url, credential
 
 
 class MediaParser(HTMLParser):
@@ -62,19 +62,33 @@ def discover(archive, client, mode, query=None):
         candidates = config.manual_urls
     elif mode == "rss":
         candidates = []
-        for url in config.feeds[:config.max_urls]:
-            with client.open(url) as response:
-                # Archive original feed bytes before interpreting them.
-                data = response.read_bounded(min(config.max_file_bytes, 4 * 1024 * 1024))
-                archive.enqueue([url], via="rss-feed")
-                class FeedResponse:
-                    pass
-                original = FeedResponse()
-                original.url = response.url
-                original.headers = response.headers
-                original.chunks = lambda: iter([data])
-                archive.capture(config.permit(url), original)
-                candidates.extend(feed_links(data))
+        errors = []
+        deferred = False
+        cursor_row = archive.db.execute("SELECT value FROM meta WHERE key='rss_cursor'").fetchone()
+        start = int(cursor_row[0]) % len(config.feeds) if cursor_row and config.feeds else 0
+        indexes = [start] if config.feeds else []  # One rotating feed bounds discovery memory and work.
+        for index in indexes:
+            url = config.feeds[index]
+            try:
+                with client.open(url) as response:
+                    # Archive original feed bytes before interpreting them.
+                    data = response.read_bounded(min(config.max_file_bytes, 4 * 1024 * 1024))
+                    archive.enqueue([url], via="rss-feed")
+                    class FeedResponse:
+                        pass
+                    original = FeedResponse()
+                    original.url = response.url
+                    original.headers = response.headers
+                    original.chunks = lambda: iter([data])
+                    archive.capture(config.permit(url), original)
+                    candidates.extend(feed_links(data))
+            except BudgetError:
+                deferred = True
+                break  # Resume this feed on its next turn.
+            except Exception as exc:
+                errors.append(type(exc).__name__)  # Never expose provider error text.
+            with archive.db:
+                archive.db.execute("INSERT OR REPLACE INTO meta VALUES ('rss_cursor',?)", (str((index + 1) % len(config.feeds)),))
     elif mode == "brave":
         if not config.brave_enabled:
             raise PolicyError("Brave is disabled; enabling it may incur API charges")
@@ -93,11 +107,24 @@ def discover(archive, client, mode, query=None):
         raise PolicyError("Unknown discovery mode")
     permitted = []
     rejected = 0
-    for url in candidates[:config.max_urls]:
+    considered = 0
+    unseen = set()
+    for url in candidates:
+        considered += 1
         try:
-            permitted.append(config.permit(url))
+            allowed = config.permit(url)
         except ValueError:
             rejected += 1
-    return {"queued": archive.enqueue(permitted, via=mode), "outside_allowlist_or_invalid": rejected,
-            "candidates_considered": min(len(candidates), config.max_urls),
-            "truncated": len(candidates) > config.max_urls}
+            continue
+        if allowed in unseen or archive.db.execute("SELECT 1 FROM resources WHERE url=?", (allowed,)).fetchone():
+            continue
+        unseen.add(allowed)
+        permitted.append(allowed)
+        if len(permitted) >= config.max_urls:
+            break
+    result = {"queued": archive.enqueue(permitted, via=mode), "outside_allowlist_or_invalid": rejected,
+              "candidates_considered": considered,
+              "truncated": considered < len(candidates)}
+    if mode == "rss":
+        result.update({"errors": errors, "deferred": deferred})
+    return result

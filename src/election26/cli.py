@@ -52,10 +52,8 @@ def main(argv=None):
             with Archive(args.archive, config).writer() as archive:
                 client = PublicHTTP(config)
                 if args.command == "run":
-                    discovery_result = discover(archive, client, args.mode) if args.mode != "none" else {"queued": 0}
-                    fetched = archive.fetch(client, refresh=args.refresh, extract_media=args.extract_media)
-                    result = {"discovery": discovery_result, "fetch": fetched, "requests": client.request_count,
-                              "status": status(archive.root)}
+                    from .runner import run_pass
+                    result = run_pass(archive, client, args.mode, args.refresh, args.extract_media)
                 elif args.command == "discover":
                     result = discover(archive, client, args.mode, args.query)
                 elif args.command == "fetch":
@@ -83,9 +81,10 @@ def main(argv=None):
                     result = publish(archive, client, args.send)
         print(json.dumps(result, indent=2, sort_keys=True))
         items = result if isinstance(result, list) else result.get("fetch", [])
-        if any(item.get("state") == "failed" for item in items):
+        discovery_result = result.get("discovery", {}) if isinstance(result, dict) else {}
+        if any(item.get("state") == "failed" for item in items) or discovery_result.get("errors") or (isinstance(result, dict) and result.get("errors")):
             return 1
-        if any(item.get("state") == "deferred" for item in items):
+        if any(item.get("state") == "deferred" for item in items) or discovery_result.get("deferred") or (isinstance(result, dict) and result.get("deferred")):
             return 75
         return 0
     except Exception as exc:

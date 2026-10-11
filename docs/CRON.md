@@ -50,3 +50,11 @@ configured URL list. `run --mode rss` captures feed originals and queues allowed
 candidate URLs. `--refresh` explicitly revisits completed URLs; without it,
 completed items are skipped. A limited pass may leave queued media for the next
 cron tick. Work beyond a cap is deferred, not silently treated as complete.
+
+Discovery/fetch starting order rotates durably between passes, so a feed cannot
+consume every tick's request allowance while queued articles starve. One RSS feed
+is visited per discovery pass, with a checkpointed rotating feed position.
+Already queued links do not consume the new-candidate allowance, and individual
+feed failures are isolated, and untouched
+pending URLs are attempted before retrying failed items. Retry attempts are
+ordered fairly rather than repeatedly selecting only the oldest broken URL.

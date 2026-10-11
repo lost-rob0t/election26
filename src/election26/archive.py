@@ -256,7 +256,7 @@ class Archive:
             params.extend(selected)
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
-        query += " ORDER BY discovered_at,url LIMIT ?"
+        query += " ORDER BY CASE WHEN state='pending' THEN 0 ELSE 1 END,attempts,discovered_at,url LIMIT ?"
         params.append(self.config.max_urls)
         pending = [r[0] for r in self.db.execute(query, params)]
         results = []

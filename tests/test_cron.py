@@ -51,3 +51,70 @@ class CronTests(unittest.TestCase):
         with patch("election26.network.public_address") as resolver:
             self.assertRaises(BudgetError, client.request, "https://news.example/fixture")
             resolver.assert_not_called()
+
+
+class ProgressTests(unittest.TestCase):
+    def test_failed_oldest_url_does_not_starve_pending_work(self):
+        from test_archive import Response
+        class Client:
+            def open(self, url):
+                if url.endswith("/a"):
+                    raise OSError("permanent fixture failure")
+                response = Response()
+                response.url = url
+                return response
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
+            config = Config(allowed_hosts=["news.example"], min_free_bytes=0)
+            with Archive(Path(tmp) / "archive", config).writer() as archive:
+                archive.enqueue(["https://news.example/a", "https://news.example/b"])
+                config.max_urls = 1
+                self.assertEqual(archive.fetch(Client())[0]["state"], "failed")
+                self.assertEqual(archive.fetch(Client())[0]["state"], "done")
+                self.assertEqual(archive.db.execute("SELECT state FROM resources WHERE url LIKE '%/b'").fetchone()[0], "done")
+
+    def test_phase_rotation_prevents_rss_budget_starvation(self):
+        from election26.runner import run_pass
+        from test_adapters import Response
+        class Client:
+            def __init__(self):
+                self.request_count = 0
+            def open(self, url):
+                if self.request_count >= 1:
+                    raise BudgetError("fixture request cap")
+                self.request_count += 1
+                if url.endswith("/rss"):
+                    return Response(b'<rss><item><link>https://news.example/story</link></item></rss>')
+                return Response(b"news fixture", url, "text/html")
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
+            config = Config(allowed_hosts=["news.example"], feeds=["https://news.example/rss"], min_free_bytes=0)
+            with Archive(Path(tmp) / "archive", config).writer() as archive:
+                first = run_pass(archive, Client(), mode="rss")
+                self.assertEqual(first["fetch"][0]["state"], "deferred")
+                second = run_pass(archive, Client(), mode="rss")
+                self.assertEqual(second["fetch"][0]["state"], "done")
+                self.assertEqual(archive.db.execute("SELECT state FROM resources WHERE url LIKE '%/story'").fetchone()[0], "done")
+
+
+    def test_rss_cursor_rotates_past_broken_feed(self):
+        from election26.discovery import discover
+        from test_adapters import Response
+        class Client:
+            def open(self, url):
+                if url.endswith("/broken"):
+                    raise OSError("fixture failure")
+                return Response(b'<rss><item><link>https://news.example/story</link></item></rss>', url)
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
+            config = Config(allowed_hosts=["news.example"], feeds=["https://news.example/broken", "https://news.example/rss"], min_free_bytes=0)
+            with Archive(Path(tmp) / "archive", config).writer() as archive:
+                self.assertEqual(discover(archive, Client(), "rss")["errors"], ["OSError"])
+                self.assertEqual(discover(archive, Client(), "rss")["queued"], 1)
+
+    def test_previously_queued_links_do_not_consume_discovery_limit(self):
+        from election26.discovery import discover
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
+            config = Config(allowed_hosts=["news.example"], manual_urls=["https://news.example/old", "https://news.example/new"], min_free_bytes=0, max_urls=1)
+            with Archive(Path(tmp) / "archive", config).writer() as archive:
+                archive.enqueue(["https://news.example/old"])
+                result = discover(archive, None, "manual")
+                self.assertEqual(result["queued"], 1)
+                self.assertIsNotNone(archive.db.execute("SELECT 1 FROM resources WHERE url LIKE '%/new'").fetchone())
