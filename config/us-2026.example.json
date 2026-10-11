@@ -10,6 +10,8 @@
   "max_archive_bytes": 10737418240,
   "min_free_bytes": 1073741824,
   "max_urls": 100,
+  "max_requests": 200,
+  "max_run_seconds": 300,
   "request_delay_seconds": 1.0,
   "brave_enabled": false,
   "brave_credential": "env:BRAVE_SEARCH_API_KEY",

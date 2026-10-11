@@ -14,6 +14,10 @@ def parser():
     cli.add_argument("--config", help="JSON config containing references, never secrets")
     cli.add_argument("--archive", required=True, help="Private archive directory outside any Git checkout")
     commands = cli.add_subparsers(dest="command", required=True)
+    run = commands.add_parser("run", help="One bounded cron-friendly discovery/fetch pass")
+    run.add_argument("--mode", choices=["manual", "rss", "none"], default="manual")
+    run.add_argument("--refresh", action="store_true")
+    run.add_argument("--extract-media", action="store_true")
     discovery = commands.add_parser("discover", help="Queue bounded allowlisted candidates")
     discovery.add_argument("--mode", choices=["manual", "rss", "brave"], default="manual")
     discovery.add_argument("--query", help="Explicit Brave query; config must also enable API usage")
@@ -21,6 +25,8 @@ def parser():
     fetch.add_argument("urls", nargs="*")
     fetch.add_argument("--refresh", action="store_true", help="Capture new observations, retaining prior versions")
     fetch.add_argument("--extract-media", action="store_true", help="Queue allowlisted direct media links from archived HTML")
+    normal = commands.add_parser("normalize", help="Optional canonical StarIntel HTTP metadata only")
+    normal.add_argument("capture_id", type=int)
     commands.add_parser("status", help="Read committed aggregate counters")
     commands.add_parser("gc", help="Dry-run retention plan only; never deletes data")
     commands.add_parser("repair", help="Rebuild missing JSON manifests from the transactional catalog")
@@ -45,10 +51,18 @@ def main(argv=None):
         else:
             with Archive(args.archive, config).writer() as archive:
                 client = PublicHTTP(config)
-                if args.command == "discover":
+                if args.command == "run":
+                    discovery_result = discover(archive, client, args.mode) if args.mode != "none" else {"queued": 0}
+                    fetched = archive.fetch(client, refresh=args.refresh, extract_media=args.extract_media)
+                    result = {"discovery": discovery_result, "fetch": fetched, "requests": client.request_count,
+                              "status": status(archive.root)}
+                elif args.command == "discover":
                     result = discover(archive, client, args.mode, args.query)
                 elif args.command == "fetch":
                     result = archive.fetch(client, args.urls, args.refresh, args.extract_media)
+                elif args.command == "normalize":
+                    from .normalize import normalize
+                    result = normalize(archive, args.capture_id)
                 elif args.command == "gc":
                     result = gc_plan(archive)
                 elif args.command == "repair":
@@ -68,16 +82,19 @@ def main(argv=None):
                     from .reporting import publish
                     result = publish(archive, client, args.send)
         print(json.dumps(result, indent=2, sort_keys=True))
-        if isinstance(result, list) and any(item.get("state") == "failed" for item in result):
+        items = result if isinstance(result, list) else result.get("fetch", [])
+        if any(item.get("state") == "failed" for item in items):
             return 1
+        if any(item.get("state") == "deferred" for item in items):
+            return 75
         return 0
     except Exception as exc:
         # Exception strings from third-party libraries can contain credentials.
         # Known local policy messages are safe, but never print provider exceptions.
-        from .config import PolicyError
+        from .config import PolicyError, BusyError, BudgetError
         message = str(exc) if isinstance(exc, PolicyError) else type(exc).__name__
         print(json.dumps({"error": message}), file=sys.stderr)
-        return 2
+        return 75 if isinstance(exc, (BusyError, BudgetError)) else 2
 
 
 if __name__ == "__main__":

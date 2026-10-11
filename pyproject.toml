@@ -12,6 +12,7 @@ dependencies = []
 [project.optional-dependencies]
 whisper = ["openai-whisper==20250625"]
 keyring = ["keyring>=25,<26"]
+starintel = ["starintel_doc @ git+https://github.com/lost-rob0t/starintel-doc.git@6aa8051dc7ea560943a60a25e1d600467f2778bc"]
 
 [project.scripts]
 election26 = "election26.cli:main"

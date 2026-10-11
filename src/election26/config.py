@@ -1,6 +1,8 @@
 """Explicit source boundaries and non-secret configuration."""
 import json
 import os
+import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit, parse_qsl
@@ -10,7 +12,17 @@ class PolicyError(ValueError):
     pass
 
 
+class BusyError(PolicyError):
+    pass
+
+
+class BudgetError(PolicyError):
+    pass
+
+
 def canonical_url(url):
+    if not isinstance(url, str) or len(url.encode("utf-8")) > 4096:
+        raise PolicyError("URL must be a string of at most 4096 UTF-8 bytes")
     parts = urlsplit(url.strip())
     if parts.scheme not in {"http", "https"} or not parts.hostname:
         raise PolicyError("Only absolute public HTTP(S) URLs are supported")
@@ -48,6 +60,8 @@ class Config:
     max_archive_bytes: int = 10 * 1024 * 1024 * 1024
     min_free_bytes: int = 1024 * 1024 * 1024
     max_urls: int = 100
+    max_requests: int = 200
+    max_run_seconds: int = 300
     request_delay_seconds: float = 1.0
     user_agent: str = "election26/0.1 (bounded public-source archive)"
     brave_enabled: bool = False
@@ -57,26 +71,56 @@ class Config:
     discord_interval_seconds: int = 900
     retention_days: int = 90
 
-    @classmethod
-    def load(cls, path=None):
-        data = json.loads(Path(path).read_text()) if path else {}
-        config = cls(**data)
-        if not config.country.isalpha() or len(config.country) != 2:
+    def __post_init__(self):
+        for name in ("brave_enabled", "discord_enabled"):
+            if type(getattr(self, name)) is not bool:
+                raise PolicyError(name + " must be a JSON boolean")
+        for name in ("allowed_hosts", "manual_urls", "feeds"):
+            values = getattr(self, name)
+            if not isinstance(values, list) or any(not isinstance(v, str) for v in values):
+                raise PolicyError(name + " must be an array of strings")
+        if not isinstance(self.country, str) or not re.fullmatch(r"[A-Za-z]{2}", self.country):
             raise PolicyError("country must be a two-letter code")
         from datetime import date
-        if date.fromisoformat(config.date_from) > date.fromisoformat(config.date_to):
+        if not isinstance(self.date_from, str) or not isinstance(self.date_to, str):
+            raise PolicyError("Date bounds must be ISO date strings")
+        if date.fromisoformat(self.date_from) > date.fromisoformat(self.date_to):
             raise PolicyError("date_from must precede date_to")
-        for key in ("max_file_bytes", "max_archive_bytes", "max_urls", "retention_days"):
-            if not isinstance(getattr(config, key), int) or getattr(config, key) <= 0:
-                raise PolicyError(key + " must be a positive integer")
-        if config.min_free_bytes < 0 or config.request_delay_seconds < 0:
-            raise PolicyError("Disk reserve and delay must not be negative")
-        if config.discord_interval_seconds < 900:
+        for name in ("year", "max_file_bytes", "max_archive_bytes", "max_urls", "max_requests", "max_run_seconds", "retention_days", "discord_interval_seconds"):
+            if type(getattr(self, name)) is not int or getattr(self, name) <= 0:
+                raise PolicyError(name + " must be a positive integer")
+        if type(self.min_free_bytes) is not int or self.min_free_bytes < 0:
+            raise PolicyError("min_free_bytes must be a nonnegative integer")
+        if (type(self.request_delay_seconds) not in (int, float)
+                or not math.isfinite(self.request_delay_seconds)
+                or not 0 <= self.request_delay_seconds <= 60):
+            raise PolicyError("request_delay_seconds must be finite and between 0 and 60")
+        if not 1900 <= self.year <= 9999:
+            raise PolicyError("year must be between 1900 and 9999")
+        if self.max_requests > 2000 or self.max_run_seconds > 3600:
+            raise PolicyError("Request/run limits may not exceed 2000 requests or 3600 seconds")
+        if self.max_urls > 500:
+            raise PolicyError("max_urls must not exceed 500 per invocation")
+        if self.discord_interval_seconds < 900:
             raise PolicyError("Discord interval must be at least 900 seconds")
-        config.allowed_hosts = [h.lower() for h in config.allowed_hosts]
-        if any("/" in h or "*" in h or ":" in h for h in config.allowed_hosts):
+        if not isinstance(self.user_agent, str) or not self.user_agent or len(self.user_agent) > 256 or any(ord(c) < 32 for c in self.user_agent):
+            raise PolicyError("Invalid user agent")
+        for reference in (self.brave_credential, self.discord_credential):
+            if not isinstance(reference, str) or not (re.fullmatch(r"env:[A-Za-z_][A-Za-z0-9_]*", reference)
+                    or re.fullmatch(r"keyring:[A-Za-z0-9_.-]+/[A-Za-z0-9_.@-]+", reference)):
+                raise PolicyError("Credentials must be environment or keyring references")
+        self.allowed_hosts = [h.lower() for h in self.allowed_hosts]
+        if any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", h) for h in self.allowed_hosts):
             raise PolicyError("Use exact DNS hostnames, without wildcards or ports")
-        return config
+
+    @classmethod
+    def load(cls, path=None):
+        def reject_constant(value):
+            raise PolicyError("Non-finite JSON numbers are not supported")
+        data = json.loads(Path(path).read_text(), parse_constant=reject_constant) if path else {}
+        if not isinstance(data, dict):
+            raise PolicyError("Configuration must be a JSON object")
+        return cls(**data)
 
     def permit(self, url):
         url = canonical_url(url)

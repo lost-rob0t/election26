@@ -10,7 +10,7 @@ import sqlite3
 import tempfile
 from datetime import datetime, timezone, timedelta
 
-from .config import PolicyError
+from .config import PolicyError, BusyError, BudgetError
 
 
 def now():
@@ -66,22 +66,50 @@ class Archive:
             raise PolicyError("Archive must be outside any Git checkout")
         self.db = None
 
+    def safe_path(self, relative):
+        relative = Path(relative)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise PolicyError("Archive path must be relative without parent traversal")
+        path = self.root / relative
+        if path != self.root and self.root not in path.parents:
+            raise PolicyError("Archive path escapes its root")
+        for item in [path, *path.parents]:
+            if item == self.root:
+                break
+            if item.is_symlink():
+                raise PolicyError("Archive symlink paths are not supported")
+        return path
+
     @contextlib.contextmanager
     def writer(self):
+        if self.db is not None:
+            raise PolicyError("Archive writer is already active")
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        allowed_names = {".writer.lock", "catalog.sqlite", "catalog.sqlite-journal", "objects", "tmp", "transcripts", "manifests", "canonical", "backup.json"}
+        if any(p.name not in allowed_names or p.is_symlink() for p in self.root.iterdir()):
+            raise PolicyError("Archive directory contains unrecognized files or symlinks")
+        if any(p.is_symlink() for p in self.root.rglob("*")):
+            raise PolicyError("Archive symlink descendants are not supported")
         lock = open(self.root / ".writer.lock", "a+")
         try:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
-                raise PolicyError("Another archive writer is active") from exc
-            for folder in ("objects", "tmp", "transcripts", "manifests"):
+                raise BusyError("Another archive writer is active") from exc
+            for folder in ("objects", "tmp", "transcripts", "manifests", "canonical"):
                 (self.root / folder).mkdir(exist_ok=True, mode=0o700)
+            sync_dir(self.root)
+            sync_dir(self.root.parent)
             self.db = sqlite3.connect(self.root / "catalog.sqlite", timeout=0)
             self.db.row_factory = sqlite3.Row
             os.chmod(self.root / "catalog.sqlite", 0o600)
             self.db.execute("PRAGMA synchronous=FULL")
             self.db.execute("PRAGMA foreign_keys=ON")
+            # Check existing format before any catalog schema changes.
+            if self.db.execute("SELECT 1 FROM sqlite_master WHERE name='meta'").fetchone():
+                existing_version = self.db.execute("SELECT value FROM meta WHERE key='format_version'").fetchone()
+                if existing_version and existing_version[0] != "1":
+                    raise PolicyError("Unsupported archive catalog version")
             self.db.executescript('''
               CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
               CREATE TABLE IF NOT EXISTS resources(
@@ -92,12 +120,18 @@ class Archive:
                 id INTEGER PRIMARY KEY, url TEXT NOT NULL REFERENCES resources(url),
                 final_url TEXT NOT NULL, captured_at TEXT NOT NULL,
                 sha256 TEXT NOT NULL, bytes INTEGER NOT NULL,
-                content_type TEXT NOT NULL, etag TEXT, last_modified TEXT);
+                content_type TEXT NOT NULL, etag TEXT, last_modified TEXT, content_encoding TEXT);
+              CREATE TABLE IF NOT EXISTS normalizations(
+                capture_id INTEGER PRIMARY KEY REFERENCES captures(id), document_id TEXT NOT NULL,
+                document_sha256 TEXT NOT NULL, path TEXT NOT NULL, sdk_commit TEXT NOT NULL);
               CREATE TABLE IF NOT EXISTS transcripts(
                 source_sha256 TEXT PRIMARY KEY, transcript_sha256 TEXT NOT NULL,
                 path TEXT NOT NULL, created_at TEXT NOT NULL, engine TEXT NOT NULL,
                 human_verified INTEGER NOT NULL DEFAULT 0);
             ''')
+            columns = {row[1] for row in self.db.execute("PRAGMA table_info(captures)")}
+            if "content_encoding" not in columns:
+                self.db.execute("ALTER TABLE captures ADD COLUMN content_encoding TEXT")
             version = self.db.execute("SELECT value FROM meta WHERE key='format_version'").fetchone()
             if version and version[0] != "1":
                 raise PolicyError("Unsupported archive catalog version")
@@ -115,6 +149,7 @@ class Archive:
 
     def enqueue(self, urls, via="manual"):
         added = 0
+        self.transaction_budget(sum(len(str(u).encode("utf-8")) + 1024 for u in urls[:self.config.max_urls]))
         with self.db:
             for raw in urls[:self.config.max_urls]:
                 url = self.config.permit(raw)
@@ -133,10 +168,16 @@ class Archive:
         if shutil.disk_usage(self.root).free - added < self.config.min_free_bytes:
             raise PolicyError("Free disk reserve would be exceeded")
 
+    def transaction_budget(self, metadata_bytes=0):
+        # SQLite rollback journals can copy every touched page. Reserve the full
+        # current catalog plus conservative B-tree/sidecar growth before writes.
+        database_bytes = (self.root / "catalog.sqlite").stat().st_size
+        self.budget(database_bytes + metadata_bytes * 4 + 256 * 1024)
+
     def object_path(self, digest):
         if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise PolicyError("Invalid SHA-256")
-        return self.root / "objects" / digest[:2] / digest
+        return self.safe_path(Path("objects") / digest[:2] / digest)
 
     def store(self, chunks):
         used = self.disk_bytes()
@@ -159,7 +200,8 @@ class Archive:
                 os.fsync(handle.fileno())
             checksum = digest.hexdigest()
             final = self.object_path(checksum)
-            final.parent.mkdir(exist_ok=True)
+            final.parent.mkdir(exist_ok=True, mode=0o700)
+            sync_dir(final.parent.parent)  # Persist a newly created shard first.
             if final.exists():
                 if sha256_file(final) != checksum:
                     raise PolicyError("Existing archive object is corrupt")
@@ -171,44 +213,62 @@ class Archive:
             temp.unlink(missing_ok=True)
 
     def capture(self, url, response):
+        url = self.config.permit(url)
+        final_url = self.config.permit(response.url)
+        for name in ("content-type", "etag", "last-modified", "content-encoding"):
+            if len(response.headers.get(name, "").encode("utf-8")) > 1024:
+                raise PolicyError("Source metadata exceeds the per-field limit")
         checksum, size = self.store(response.chunks())
         record = {
-            "url": url, "final_url": response.url, "captured_at": now(),
+            "url": url, "final_url": final_url, "captured_at": now(),
             "sha256": checksum, "bytes": size,
             "content_type": response.headers.get("content-type", "application/octet-stream"),
             "etag": response.headers.get("etag"),
             "last_modified": response.headers.get("last-modified"),
+            "content_encoding": response.headers.get("content-encoding"),
         }
+        self.transaction_budget(len(json.dumps(record, ensure_ascii=False).encode("utf-8")))
         # One SQLite commit publishes both observation and resume checkpoint.
         with self.db:
             cursor = self.db.execute(
-                "INSERT INTO captures(url,final_url,captured_at,sha256,bytes,content_type,etag,last_modified) "
-                "VALUES (:url,:final_url,:captured_at,:sha256,:bytes,:content_type,:etag,:last_modified)", record)
+                "INSERT INTO captures(url,final_url,captured_at,sha256,bytes,content_type,etag,last_modified,content_encoding) "
+                "VALUES (:url,:final_url,:captured_at,:sha256,:bytes,:content_type,:etag,:last_modified,:content_encoding)", record)
             self.db.execute("UPDATE resources SET state='done',error=NULL WHERE url=?", (url,))
         record["id"] = cursor.lastrowid
-        atomic_json(self.root / "manifests" / (str(record["id"]) + ".json"), record)
+        try:
+            atomic_json(self.root / "manifests" / (str(record["id"]) + ".json"), record)
+        except OSError:
+            # Capture/checkpoint are committed. Repair can reconstruct this sidecar.
+            record["manifest_pending"] = True
         return record
 
     def fetch(self, client, urls=None, refresh=False, extract_media=False):
         if urls:
             self.enqueue(urls)
         query = "SELECT url FROM resources"
+        conditions = []
+        params = []
         if not refresh:
-            query += " WHERE state IN ('pending','failed')"
-        query += " ORDER BY discovered_at,url LIMIT ?"
-        pending = [r[0] for r in self.db.execute(query, (self.config.max_urls,))]
+            conditions.append("state IN ('pending','failed')")
         if urls:
-            selected = {self.config.permit(u) for u in urls}
-            pending = [u for u in pending if u in selected]
+            selected = list(dict.fromkeys(self.config.permit(u) for u in urls[:self.config.max_urls]))
+            conditions.append("url IN (" + ",".join("?" for _ in selected) + ")")
+            params.extend(selected)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY discovered_at,url LIMIT ?"
+        params.append(self.config.max_urls)
+        pending = [r[0] for r in self.db.execute(query, params)]
         results = []
         for url in pending:
+            self.transaction_budget(len(url.encode("utf-8")) + 1024)
             with self.db:
                 self.db.execute("UPDATE resources SET state='running',attempts=attempts+1 WHERE url=?", (url,))
             try:
                 with client.open(url) as response:
                     record = self.capture(url, response)
                 results.append({"sha256": record["sha256"], "state": "done"})
-                if extract_media and "html" in record["content_type"]:
+                if extract_media and "html" in record["content_type"] and record["content_encoding"] in (None, "identity"):
                     from .discovery import media_links
                     # Parsing has a separate bound from a multimedia download.
                     if record["bytes"] <= 4 * 1024 * 1024:
@@ -220,7 +280,17 @@ class Archive:
                             except ValueError:
                                 continue
                         self.enqueue(allowed, via="html-media")
+            except BudgetError:
+                with self.db:
+                    self.db.execute("UPDATE resources SET state='pending' WHERE url=?", (url,))
+                results.append({"state": "deferred", "reason": "run_budget_exhausted"})
+                break
             except Exception as exc:
+                # Post-capture extraction must never downgrade a committed original.
+                if results and results[-1].get("state") == "done" and self.db.execute(
+                        "SELECT state FROM resources WHERE url=?", (url,)).fetchone()[0] == "done":
+                    results[-1]["postprocess_error"] = type(exc).__name__
+                    continue
                 # Exception messages may contain URLs, headers, or provider secrets.
                 with self.db:
                     self.db.execute("UPDATE resources SET state='failed',error=? WHERE url=?", (type(exc).__name__, url))
@@ -231,19 +301,24 @@ class Archive:
         for row in self.db.execute("SELECT * FROM captures"):
             path = self.root / "manifests" / (str(row["id"]) + ".json")
             if not path.exists():
+                self.budget(len(json.dumps(dict(row)).encode("utf-8")) + 4096)
                 atomic_json(path, dict(row))
 
     def backup(self, path):
         path = Path(path).expanduser().resolve()
+        Archive(path, self.config)  # Apply the same private/outside-Git destination policy.
         if path.exists():
             raise PolicyError("Backup destination already exists")
         if path == self.root or self.root in path.parents:
             raise PolicyError("Backup must be outside the archive")
-        path.mkdir(parents=True, mode=0o700)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if shutil.disk_usage(path.parent).free < self.disk_bytes() + self.config.min_free_bytes:
+            raise PolicyError("Backup destination has insufficient free space")
+        path.mkdir(mode=0o700)
         # Caller holds the writer lock, so blobs and catalog share a stable view.
         with sqlite3.connect(path / "catalog.sqlite") as target:
             self.db.backup(target)
-        for name in ("objects", "manifests", "transcripts"):
+        for name in ("objects", "manifests", "transcripts", "canonical"):
             shutil.copytree(self.root / name, path / name)
         atomic_json(path / "backup.json", {"created_at": now(), "format_version": 1})
         return {"backup_created": True}
@@ -256,7 +331,10 @@ def status(root):
         return {"initialized": False, "capture_observations": 0, "unique_objects": 0,
                 "original_bytes": 0, "stored_object_bytes": 0, "canonical_documents": 0,
                 "transcripts": 0, "errors": 0, "queue": {}}
+    if path.is_symlink():
+        raise PolicyError("Archive catalog symlinks are not supported")
     with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
+        db.execute("BEGIN")  # All counters come from the same committed snapshot.
         rows = db.execute("SELECT sha256, MAX(bytes) FROM captures GROUP BY sha256").fetchall()
         return {
             "initialized": True,
@@ -264,7 +342,7 @@ def status(root):
             "unique_objects": len(rows),
             "original_bytes": db.execute("SELECT COALESCE(SUM(bytes),0) FROM captures").fetchone()[0],
             "stored_object_bytes": sum(r[1] for r in rows),
-            "canonical_documents": 0,
+            "canonical_documents": db.execute("SELECT COUNT(*) FROM normalizations").fetchone()[0] if db.execute("SELECT 1 FROM sqlite_master WHERE name='normalizations'").fetchone() else 0,
             "transcripts": db.execute("SELECT COUNT(*) FROM transcripts").fetchone()[0],
             "errors": db.execute("SELECT COUNT(*) FROM resources WHERE state='failed'").fetchone()[0],
             "queue": dict(db.execute("SELECT state,COUNT(*) FROM resources GROUP BY state")),
@@ -280,7 +358,7 @@ def gc_plan(archive):
         FROM captures c JOIN transcripts t ON t.source_sha256=c.sha256
         WHERE t.human_verified=1 GROUP BY c.sha256 HAVING MAX(c.captured_at) < ?
     ''', (cutoff,)):
-        transcript = archive.root / row["path"]
+        transcript = archive.safe_path(Path("transcripts") / (row["sha256"] + ".json"))
         source = archive.object_path(row["sha256"])
         if (transcript.is_file() and source.is_file()
                 and sha256_file(transcript) == row["transcript_sha256"]

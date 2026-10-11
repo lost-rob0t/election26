@@ -41,10 +41,13 @@ def publish(archive, client, send=False):
     body = json.dumps(payload).encode("utf-8")
     with archive.db:
         archive.db.execute("INSERT INTO meta VALUES ('discord_pending',?)", (str(stamp),))
-    with client.request(webhook, method="POST", body=body,
+    with client.request(webhook + "?wait=true", method="POST", body=body,
                         headers={"Content-Type": "application/json"}, allowed_hosts=["discord.com"]) as response:
-        if response.status not in (200, 204):
+        if response.status != 200:
             raise PolicyError("Discord send failed or is uncertain; no automatic retry")
+        receipt = json.loads(response.read_bounded(16 * 1024))
+        if not isinstance(receipt.get("id"), str) or not receipt["id"].isdigit():
+            raise PolicyError("Discord response lacks a confirmed message ID")
     with archive.db:
         archive.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (key, str(stamp)))
         archive.db.execute("DELETE FROM meta WHERE key='discord_pending'")

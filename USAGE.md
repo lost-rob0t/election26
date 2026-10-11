@@ -5,6 +5,9 @@ manifests, transcripts, credentials, and all generated data on private local
 storage outside Git.** No live collection, API call, or Discord post runs on
 installation, import, or CI. The repository owner's original README is preserved.
 
+For continuous collection, see [the cron deployment guide](docs/CRON.md).
+Each scheduled invocation is bounded and resumes from durable state.
+
 ## First run
 
 Python 3.11+ on Linux/macOS is required (`fcntl` provides crash-safe writer locks).
@@ -19,7 +22,7 @@ cp config/us-2026.example.json config.local.json
 
 Edit `config.local.json`: add exact approved public source hosts to
 `allowed_hosts`, and approved URLs to `manual_urls` or RSS/Atom URLs to `feeds`.
-An empty allowlist intentionally collects nothing. Each redirected/media host
+An empty allowlist intentionally collects nothing. See `docs/SOURCES.md` for a bounded official U.S. starting profile and news-feed candidates. Each redirected/media host
 must also be explicitly allowed. Configure a private local archive directory and
 disk budgets appropriate to your machine; the example 10 GiB cap is a starter
 limit, not an estimate of nationwide coverage.
@@ -69,12 +72,15 @@ charges. There is no automatic pagination or paid transcription. An optional
 - `catalog.sqlite`: operational URL queue, capture observations, checkpoints,
   transcript provenance, and notification state. **Not a StarIntel schema.**
 - `manifests/<capture-id>.json`: source/final URL, UTC capture time, SHA-256,
-  byte count, media type, ETag, and Last-Modified.
+  byte count, media type/encoding, ETag, and Last-Modified.
 - `transcripts/<source-sha256>.json`: local derived result with source/model hash.
 
 Writes stream to a temporary file, hash, fsync, atomically rename, then commit
 observation + checkpoint in one SQLite transaction. A process lock excludes a
-second writer. Status reads committed transactions. Duplicate bytes share one
+second writer. URLs and retained header fields have byte limits. Disk admission
+conservatively reserves catalog rollback-journal, sidecar, and metadata space;
+this may stop before the nominal cap. Model files and backups have separate
+capacity needs. Archive descendants may not be symlinks. Status reads committed transactions. Duplicate bytes share one
 object while each capture observation retains its provenance.
 
 A crash between blob and catalog commits may leave an orphan object; `gc` lists
@@ -96,14 +102,19 @@ before relying on a backup. A single disk is not a disaster-recovery plan.
 
 ```sh
 python -m pip install '.[whisper]'
-# Install FFmpeg from its official package source; acquire a trusted Whisper
-# model checkpoint separately. This command never downloads a model for you.
+# Acquire a trusted official tiny/base Whisper model checkpoint separately.
+# This command never downloads a model or invokes FFmpeg.
 election26 --config config.local.json --archive "$ARCHIVE" transcribe SOURCE_SHA256 --model-path /private/models/base.pt --language en
 # After reading and checking accuracy yourself:
 election26 --config config.local.json --archive "$ARCHIVE" transcribe SOURCE_SHA256 --verify
 ```
 
-Whisper is optional and local-only. No raw media is uploaded to a provider.
+Whisper is optional and local-only. The first slice accepts complete mono
+16 kHz signed 16-bit PCM WAV recordings of at most ten minutes and trusted model
+checkpoints up to 160 MiB. Other media formats remain archived but fail closed
+for transcription. It decodes WAV with the standard library and gives Whisper
+a bounded sample array, never an untrusted filename or playlist. No raw media
+is uploaded to a provider.
 Transcripts can contain errors; a successful checksum is not an accuracy review.
 Human verification is explicit. Model/dependency installation can consume
 substantial storage, separate from the archive disk budget.
@@ -113,6 +124,26 @@ retention window with a human-reviewed, intact transcript and intact original.
 **There is no permanent deletion or automatic eviction command.** All originals,
 transcripts, hashes, and provenance remain. Retention planning does not treat
 an image, video, or audio original as equivalent to its transcript.
+
+## Optional canonical StarIntel metadata
+
+```sh
+python -m pip install '.[starintel]'
+election26 --config config.local.json --archive "$ARCHIVE" normalize 1
+```
+
+The optional dependency is pinned to StarIntel SDK 0.10.1 at immutable commit
+`6aa8051dc7ea560943a60a25e1d600467f2778bc`. Its canonical lock pins StarLang
+`9198370f7a6f3e2a5ea00af3efdb6d705e102650`. The adapter verifies the installed
+VCS commit and schema version, calls the SDK's `build_http_transaction`, and
+validates/serializes through its exact-number-aware API. It does not create
+people, relationships, election claims, or a new domain schema.
+
+`normalize CAPTURE_ID` creates local canonical HTTP metadata, joined to the raw
+hash and source observation through the operational catalog. Original bytes and
+historical captures never change when normalization fails or is absent. Output
+stays private in `canonical/`. No upstream/private code is copied into this repo.
+See `docs/STARINTEL.md` for verified APIs and licensing caveat.
 
 ## Optional Discord aggregate status
 
@@ -125,7 +156,8 @@ election26 --config config.local.json --archive "$ARCHIVE" stats --send
 Disabled by default. `stats` previews only fixed aggregate counters. Set
 `discord_enabled` and reference a webhook stored in the local environment or
 keyring only after authorizing the destination. `--send` sends once; a persisted
-15-minute minimum interval limits repeats. No scheduler is installed. An
+15-minute minimum interval limits repeats. `wait=true` requires a confirmed
+Discord message ID before marking success. No scheduler is installed. An
 uncertain send leaves a pending marker and blocks automatic retries; inspect
 the destination before an operator clears that marker. Mentions are disabled.
 The webhook URL is a secret and must not appear in Git, CLI arguments, or logs.
@@ -142,8 +174,9 @@ Discord destination, live collection, optional Whisper model execution, or
 user-computer deployment is configured by this bootstrap. Direct HTTP media
 is supported; JavaScript-rendered sites, segmented streaming, authenticated
 content, social network APIs, and third-party downloaders are not yet wired.
-There is no network service or dashboard. Optional StarIntel normalization is
-a later stage; failure or absence must never discard original bytes.
+There is no network service or dashboard. Optional StarIntel metadata normalization uses the pinned SDK; adapter boundary
+tests run with fixtures, while live SDK installation and Whisper model inference
+remain separate integration checks. Raw originals always survive adapter failures.
 
 ## Official references
 
