@@ -69,6 +69,7 @@ def discover(archive, client, mode, query=None):
         indexes = [start] if config.feeds else []  # One rotating feed bounds discovery memory and work.
         for index in indexes:
             url = config.feeds[index]
+            requests_before = getattr(client, "request_count", 0)
             try:
                 with client.open(url) as response:
                     # Archive original feed bytes before interpreting them.
@@ -84,7 +85,12 @@ def discover(archive, client, mode, query=None):
                     candidates.extend(feed_links(data))
             except BudgetError:
                 deferred = True
-                break  # Resume this feed on its next turn.
+                # A costly feed must not monopolize every future discovery tick.
+                # If no request was admitted, retain its turn for the next pass.
+                if getattr(client, "request_count", 0) > requests_before:
+                    with archive.db:
+                        archive.db.execute("INSERT OR REPLACE INTO meta VALUES ('rss_cursor',?)", (str((index + 1) % len(config.feeds)),))
+                break
             except Exception as exc:
                 errors.append(type(exc).__name__)  # Never expose provider error text.
             with archive.db:

@@ -118,3 +118,27 @@ class ProgressTests(unittest.TestCase):
                 result = discover(archive, None, "manual")
                 self.assertEqual(result["queued"], 1)
                 self.assertIsNotNone(archive.db.execute("SELECT 1 FROM resources WHERE url LIKE '%/new'").fetchone())
+
+
+    def test_budget_consuming_feed_rotates_but_unstarted_feed_keeps_turn(self):
+        from election26.discovery import discover
+        from test_adapters import Response
+        class Client:
+            def __init__(self, exhausted=False):
+                self.request_count = 1 if exhausted else 0
+                self.exhausted = exhausted
+            def open(self, url):
+                if self.exhausted:
+                    raise BudgetError("no request admitted")
+                self.request_count += 1
+                if url.endswith("/costly"):
+                    raise BudgetError("redirects consumed fixture budget")
+                return Response(b'<rss><item><link>https://news.example/story</link></item></rss>', url)
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
+            config = Config(allowed_hosts=["news.example"], feeds=["https://news.example/costly", "https://news.example/rss"], min_free_bytes=0)
+            with Archive(Path(tmp) / "archive", config).writer() as archive:
+                self.assertTrue(discover(archive, Client(), "rss")["deferred"])
+                self.assertEqual(archive.db.execute("SELECT value FROM meta WHERE key='rss_cursor'").fetchone()[0], "1")
+                self.assertTrue(discover(archive, Client(exhausted=True), "rss")["deferred"])
+                self.assertEqual(archive.db.execute("SELECT value FROM meta WHERE key='rss_cursor'").fetchone()[0], "1")
+                self.assertEqual(discover(archive, Client(), "rss")["queued"], 1)
