@@ -2,6 +2,7 @@
 import hashlib
 import importlib.metadata
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -13,13 +14,49 @@ SPEC_VERSION = "0.10.1"
 STARLANG_COMMIT = "9198370f7a6f3e2a5ea00af3efdb6d705e102650"
 
 
+def verify_sdk_source(distribution):
+    """Verify pip VCS metadata or the separate locked-Nix build receipt.
+
+    This is installation provenance, not a signature against a malicious local
+    package/store administrator. Never relabel a Nix wheel as a pip VCS install.
+    """
+    def metadata(text):
+        try:
+            value = json.loads(text or "{}")
+        except (ValueError, TypeError):
+            raise PolicyError("Invalid optional StarIntel SDK source metadata") from None
+        if not isinstance(value, dict):
+            raise PolicyError("Invalid optional StarIntel SDK source metadata")
+        return value
+
+    direct_text = distribution.read_text("direct_url.json")
+    if direct_text is not None:
+        direct = metadata(direct_text)
+        vcs = direct.get("vcs_info", {})
+        if not isinstance(vcs, dict) or vcs.get("commit_id") != SDK_COMMIT:
+            raise PolicyError("Install the exact pinned StarIntel SDK commit")
+        return
+    receipt = metadata(distribution.read_text("election26_nix_source.json"))
+    expected = {
+        "format": "election26-nix-source-v1",
+        "source_url": "github:lost-rob0t/starintel-doc",
+        "source_rev": SDK_COMMIT,
+    }
+    location = Path(distribution.locate_file("")).resolve()
+    digest = receipt.get("source_nar_hash", "")
+    if (not location.is_relative_to(Path("/nix/store"))
+            or set(receipt) != {*expected, "source_nar_hash"}
+            or any(receipt.get(key) != value for key, value in expected.items())
+            or not isinstance(digest, str)
+            or re.fullmatch(r"sha256-[A-Za-z0-9+/]{43}=", digest) is None):
+        raise PolicyError("Install the exact pinned StarIntel SDK commit")
+
+
 def sdk():
     distribution = importlib.metadata.distribution("starintel_doc")
     if distribution.version != SPEC_VERSION:
         raise PolicyError("Optional StarIntel SDK must be version 0.10.1")
-    direct = json.loads(distribution.read_text("direct_url.json") or "{}")
-    if direct.get("vcs_info", {}).get("commit_id") != SDK_COMMIT:
-        raise PolicyError("Install the exact pinned StarIntel SDK commit")
+    verify_sdk_source(distribution)
     import starintel_doc
     if starintel_doc.SPEC_VERSION != SPEC_VERSION:
         raise PolicyError("Canonical StarIntel schema version mismatch")

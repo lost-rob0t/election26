@@ -16,6 +16,7 @@ starintel = ["starintel_doc @ git+https://github.com/lost-rob0t/starintel-doc.gi
 
 [project.scripts]
 election26 = "election26.cli:main"
+election26-fec-target = "election26.fec_target:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
