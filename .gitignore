@@ -18,3 +18,18 @@ config.local.json
 
 canonical/
 manifests/
+
+# Private operator location inputs and every derivative belong outside Git.
+*.[kK][mM][lL]
+*.[kK][mM][zZ]
+*.[gG][pP][xX]
+*.[gG][eE][oO][jJ][sS][oO][nN]
+*.[gG][pP][kK][gG]
+*.[cC][sS][vV]
+*.[pP][cC][aA][pP]*
+private/
+captures/
+spool/
+exports/
+routes/
+wigle/

@@ -5,7 +5,7 @@ daemon. Persistent SQLite checkpoints, immutable blobs, and URL deduplication
 survive process exit; subsequent invocations continue pending work.
 
 ```sh
-/path/to/venv/bin/election26 --config /private/config.local.json --archive /private/election26 run --mode rss --extract-media
+/path/to/venv/bin/election26 --config /private/config.local.json --archive /private/election26 run --mode rss
 ```
 
 Each pass respects `max_urls` (default 100), `max_requests` (default 200),
@@ -38,7 +38,9 @@ arrange log rotation. Inspect the output and add it with `crontab -e`, or rerun
 with `--install` to append it to the current user's readable crontab. The installer
 preserves existing entries and refuses duplicate managed blocks. If no readable
 crontab exists, it stops and asks the operator to initialize it rather than
-silently replacing anything. This repository never installs cron automatically.
+silently replacing anything. This repository never installs cron automatically. The generated block does not
+request media extraction/downloads. See the [Termux guide](TERMUX.md) for Android
+process-lifetime limits before relying on a phone schedule.
 
 The example runs collection every five minutes and includes a commented
 15-minute `stats --send` line. Enable that line only after the Discord destination,

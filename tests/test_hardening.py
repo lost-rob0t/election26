@@ -19,7 +19,7 @@ from election26.transcribe import pcm_samples
 
 class HardeningTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(dir="/tmp")
+        self.tmp = tempfile.TemporaryDirectory(dir=tempfile.gettempdir())
         self.addCleanup(self.tmp.cleanup)
         guard = patch("election26.archive.inside_git_checkout", return_value=False)
         guard.start()

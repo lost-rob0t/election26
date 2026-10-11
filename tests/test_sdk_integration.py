@@ -14,7 +14,7 @@ from election26.normalize import normalize, sdk
 class PinnedSDKTests(unittest.TestCase):
     def test_real_sdk_builds_valid_canonical_metadata_and_keeps_raw(self):
         from test_archive import Client
-        with tempfile.TemporaryDirectory(dir="/tmp") as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
+        with tempfile.TemporaryDirectory(dir=tempfile.gettempdir()) as tmp, patch("election26.archive.inside_git_checkout", return_value=False):
             root = Path(tmp) / "private-fixture"
             with Archive(root, Config(allowed_hosts=["news.example"], min_free_bytes=0)).writer() as archive:
                 capture = archive.fetch(Client(), ["https://news.example/story"])[0]

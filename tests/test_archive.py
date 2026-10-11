@@ -46,7 +46,7 @@ class ArchiveTests(unittest.TestCase):
         self.git_guard = patch("election26.archive.inside_git_checkout", return_value=False)
         self.git_guard.start()
         self.addCleanup(self.git_guard.stop)
-        self.tmp = tempfile.TemporaryDirectory(dir="/tmp")
+        self.tmp = tempfile.TemporaryDirectory(dir=tempfile.gettempdir())
         self.root = Path(self.tmp.name) / "private-archive"
         self.config = Config(allowed_hosts=["news.example"], min_free_bytes=0)
         self.archive = Archive(self.root, self.config)

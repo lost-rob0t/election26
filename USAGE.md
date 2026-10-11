@@ -5,12 +5,16 @@ manifests, transcripts, credentials, and all generated data on private local
 storage outside Git.** No live collection, API call, or Discord post runs on
 installation, import, or CI. The repository owner's original README is preserved.
 
-For continuous collection, see [the cron deployment guide](docs/CRON.md).
+For Android installation, see [the Termux guide](docs/TERMUX.md). All runtime
+commands work locally without GitHub or CI. For continuous collection, see
+[the cron deployment guide](docs/CRON.md).
 Each scheduled invocation is bounded and resumes from durable state.
 
 ## First run
 
-Python 3.11+ on Linux/macOS is required (`fcntl` provides crash-safe writer locks).
+Python 3.11+ is required (`fcntl` provides crash-safe writer locks). The desktop
+path targets Linux/macOS; Android uses the separate Termux installer and emulator
+verification described in the Termux guide.
 The base pipeline uses only Python's standard library.
 
 ```sh
@@ -30,13 +34,19 @@ limit, not an estimate of nationwide coverage.
 ```sh
 export ARCHIVE="$HOME/.local/share/election26/us-2026"
 election26 --config config.local.json --archive "$ARCHIVE" discover --mode manual
-election26 --config config.local.json --archive "$ARCHIVE" fetch --extract-media
 election26 --config config.local.json --archive "$ARCHIVE" fetch
 election26 --archive "$ARCHIVE" status
 election26 --archive "$ARCHIVE" gc
 ```
 
-`fetch --extract-media` queues direct media links in captured HTML. A subsequent
+Default HTML collection keeps embedded media links without following them.
+RSS/Atom enclosure references remain in the original feed and are not queued. A separate per-source media policy and structured link manifest
+are planned; ordinary article/manual URLs are not yet content-type-gated, and
+existing queued items remain pending. Review those inputs before a links-only
+run. Do not use broad media extraction for a phone archive.
+
+The explicit legacy `fetch --extract-media` flag queues direct media links in
+captured HTML. A subsequent
 `fetch` archives those queued objects. This is bounded one-hop extraction, not an
 unrestricted crawler. `fetch URL` queues and captures a specific allowed URL.
 `fetch --refresh URL` records a new observation and preserves previous versions.
@@ -47,8 +57,20 @@ Interruptions resume at the item boundary, not at a byte offset.
 ## Discovery and scope
 
 The initial profile is nationwide United States, election year 2026, with public
-news/event and protest coverage as a priority. No people dossiers, facial
-recognition, biometrics, private account content, or participant tracking.
+news/event and protest coverage as a priority. This is a raw acquisition layer:
+HTML, JSON and optionally selected media, with derived transcription when
+explicitly requested and supported. Later aggregation belongs in Star Server.
+No people dossiers, facial recognition, biometrics, or private account content.
+
+Operator-provided WiGLE files are a separate planned local input; there is no
+WiGLE importer in this slice. Preserve originals privately and keep sanitized
+exports separate. Never Git-track or commit WiGLE KML/KMZ files or route-bearing
+derivatives, even for a private simulation comparison. Use
+`python scripts/check-public-tree.py --staged` before any commit; CI also checks
+the committed tree. Ignore rules and this guard are defense in depth, not
+proof that arbitrary renamed/encoded data is safe. No real KML fixtures belong
+in this public repository. Wireless observations must not be used here to infer identities,
+political affiliation, or protest attendance.
 The date bounds are sent to Brave when used; RSS/manual archival does not infer
 publication dates or silently discard originals based on uncertain dates.
 Country/year/date fields support later explicitly selected profiles. They do not
@@ -169,14 +191,16 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 python -m compileall -q src
 ```
 
-CI tests synthetic fixtures only, across Python 3.11–3.13. No API credentials,
+The Linux CI matrix tests synthetic fixtures across Python 3.11–3.13. The
+separate Android workflow executes inside a real Termux app on an Android emulator;
+its exact run must pass before Android support is claimed. No API credentials,
 Discord destination, live collection, optional Whisper model execution, or
 user-computer deployment is configured by this bootstrap. Direct HTTP media
 is supported; JavaScript-rendered sites, segmented streaming, authenticated
 content, social network APIs, and third-party downloaders are not yet wired.
 There is no network service or dashboard. Optional StarIntel metadata normalization uses the pinned SDK; adapter boundary
-tests run with fixtures, while live SDK installation and Whisper model inference
-remain separate integration checks. Raw originals always survive adapter failures.
+tests run with fixtures, the canonical SDK job also installs the exact real SDK and validates the generated
+contract. Whisper model inference remains untested. Raw originals always survive adapter failures.
 
 ## Official references
 

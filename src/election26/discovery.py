@@ -47,12 +47,12 @@ def feed_links(data):
     for item in root.iter():
         tag = item.tag.rsplit("}", 1)[-1]
         if tag == "link":
-            if item.attrib.get("rel", "alternate") in {"alternate", "enclosure"}:
+            if item.attrib.get("rel", "alternate") == "alternate":
                 value = item.attrib.get("href") or item.text
                 if value:
                     links.append(value.strip())
-        if tag == "enclosure" and item.attrib.get("url"):
-            links.append(item.attrib["url"])
+        # RSS enclosure / Atom rel=enclosure links stay in the raw feed.
+        # Downloading them requires the future explicit per-source media policy.
     return list(dict.fromkeys(links))
 
 

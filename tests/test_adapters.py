@@ -57,7 +57,7 @@ class AdapterTests(unittest.TestCase):
         guard = patch("election26.archive.inside_git_checkout", return_value=False)
         guard.start()
         self.addCleanup(guard.stop)
-        self.temp = tempfile.TemporaryDirectory(dir="/tmp")
+        self.temp = tempfile.TemporaryDirectory(dir=tempfile.gettempdir())
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / "private"
         self.config = Config(allowed_hosts=["news.example"], min_free_bytes=0)
@@ -72,6 +72,21 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(result["outside_allowlist_or_invalid"], 1)
             self.assertEqual(status(self.root)["capture_observations"], 1)
             self.assertTrue(archive.object_path(hashlib.sha256(data).hexdigest()).exists())
+
+    def test_rss_and_atom_enclosures_stay_raw_and_are_not_queued(self):
+        data = b'''<rss><item><link>https://news.example/story</link>
+            <enclosure url="https://news.example/audio.mp3" type="audio/mpeg"/>
+            <link rel="enclosure" href="https://news.example/video.mp4"/>
+            </item></rss>'''
+        self.config.feeds = ["https://news.example/rss"]
+        client = Client(Response(data))
+        with self.archive.writer() as archive:
+            result = discover(archive, client, "rss")
+            self.assertEqual(result["queued"], 1)
+            queued = {r[0] for r in archive.db.execute("SELECT url FROM resources")}
+            self.assertEqual(queued, {"https://news.example/rss", "https://news.example/story"})
+            self.assertEqual(archive.object_path(hashlib.sha256(data).hexdigest()).read_bytes(), data)
+            self.assertEqual(len(client.calls), 1)
 
     def test_brave_opt_in_shape_and_allowlist(self):
         client = Client(Response(b'{"web":{"results":[{"url":"https://news.example/story"}]}}'))
