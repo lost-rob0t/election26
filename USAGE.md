@@ -64,7 +64,12 @@ No people dossiers, facial recognition, biometrics, or private account content.
 
 Operator-provided WiGLE files are a separate planned local input; there is no
 WiGLE importer in this slice. Preserve originals privately and keep sanitized
-exports separate. Wireless observations must not be used here to infer identities,
+exports separate. Never Git-track or commit WiGLE KML/KMZ files or route-bearing
+derivatives, even for a private simulation comparison. Use
+`python scripts/check-public-tree.py --staged` before any commit; CI also checks
+the committed tree. Ignore rules and this guard are defense in depth, not
+proof that arbitrary renamed/encoded data is safe. No real KML fixtures belong
+in this public repository. Wireless observations must not be used here to infer identities,
 political affiliation, or protest attendance.
 The date bounds are sent to Brave when used; RSS/manual archival does not infer
 publication dates or silently discard originals based on uncertain dates.

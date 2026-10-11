@@ -23,14 +23,7 @@ jobs:
       - run: python -m compileall -q src
       - run: election26 --archive "$RUNNER_TEMP/election26-status-only" status
       - name: Reject collected data in source control
-        run: |
-          python - <<'PY'
-          import subprocess
-          forbidden = {'objects', 'transcripts', 'canonical', 'manifests', 'archives', 'archive', 'data'}
-          tracked = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
-          bad = [p for p in tracked if forbidden.intersection(p.split('/')[:-1]) or p.endswith(('.sqlite', '.sqlite3', '.part')) or p.rsplit('/', 1)[-1].startswith('.env')]
-          assert not bad, 'Private archive or credential files must not be committed: ' + repr(bad)
-          PY
+        run: python scripts/check-public-tree.py
   canonical-sdk:
     runs-on: ubuntu-latest
     timeout-minutes: 10

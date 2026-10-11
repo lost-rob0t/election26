@@ -41,7 +41,7 @@ fi
 echo 'TERMUX_BOOTSTRAP_COMPLETED' 
 adb shell run-as com.termux /system/bin/mkdir -p /data/data/com.termux/files/home/election26-ci
 # Only committed public source enters the emulator, no Git credential/config files.
-git archive HEAD | adb shell -T run-as com.termux /system/bin/tar -xf - -C /data/data/com.termux/files/home/election26-ci
+git archive HEAD | adb shell -T run-as com.termux /system/bin/tar --no-same-owner -xf - -C /data/data/com.termux/files/home/election26-ci
 adb shell -T run-as com.termux /system/bin/sh <<'ANDROID'
 set -eu
 export HOME=/data/data/com.termux/files/home
