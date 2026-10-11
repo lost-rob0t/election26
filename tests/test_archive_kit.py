@@ -47,6 +47,10 @@ class FixtureHTTP:
 
 class ArchiveKitTests(unittest.TestCase):
     def setUp(self):
+        # Match the production launcher's private umask, including on Termux
+        # where the ambient interactive-shell umask may allow group writes.
+        previous_umask = os.umask(0o077)
+        self.addCleanup(os.umask, previous_umask)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
@@ -143,9 +147,25 @@ class ArchiveKitTests(unittest.TestCase):
         (self.cwd / "archive").mkdir()
         secret = self.home / "unrelated"
         secret.write_text("leave alone")
-        os.link(secret, self.cwd / "archive/catalog.sqlite")
-        self.assertRaises(PolicyError, kit.paths, self.cwd, self.home)
-        (self.cwd / "archive/catalog.sqlite").unlink()
+        catalog = self.cwd / "archive/catalog.sqlite"
+        if hasattr(os, "link"):
+            os.link(secret, catalog)
+            self.assertRaises(PolicyError, kit.paths, self.cwd, self.home)
+        else:
+            # Android Python may omit os.link. Exercise the same nlink guard
+            # with synthetic stat metadata instead of skipping the safety check.
+            catalog.write_text("synthetic catalog")
+            real_stat = Path.stat
+            def linked_stat(path, *args, **kwargs):
+                value = real_stat(path, *args, **kwargs)
+                if path == catalog:
+                    fields = list(value)
+                    fields[3] = 2  # st_nlink
+                    return os.stat_result(fields)
+                return value
+            with patch.object(Path, "stat", linked_stat):
+                self.assertRaises(PolicyError, kit.paths, self.cwd, self.home)
+        catalog.unlink()
         self.assertEqual(secret.read_text(), "leave alone")
         self.assertRaises(PolicyError, kit.paths, self.home.parent, self.home)
         with patch.object(kit, "inside_git_checkout", return_value=True):

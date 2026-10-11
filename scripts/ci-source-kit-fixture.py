@@ -17,6 +17,8 @@ spec.loader.exec_module(builder)
 
 
 def main():
+    # Direct synthetic helper calls use the same private mask as main/launcher.
+    os.umask(0o077)
     if not Path("/system/bin/getprop").exists():
         raise SystemExit("This entrypoint verification requires real Android Termux")
     with tempfile.TemporaryDirectory(prefix="kit extraction with spaces ", dir=Path.home()) as tmp:
