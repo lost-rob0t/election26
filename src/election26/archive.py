@@ -122,11 +122,23 @@ class Archive(MediaCatalog):
             self.db.execute("PRAGMA synchronous=FULL")
             self.db.execute("PRAGMA foreign_keys=ON")
             # Check existing format before any catalog schema changes.
+            existing_version = None
             if self.db.execute("SELECT 1 FROM sqlite_master WHERE name='meta'").fetchone():
                 existing_version = self.db.execute("SELECT value FROM meta WHERE key='format_version'").fetchone()
                 if existing_version and existing_version[0] not in {"1", "2"}:
                     raise PolicyError("Unsupported archive catalog version")
+            migrating = not existing_version or existing_version[0] == "1"
+            if migrating:
+                # Reserve URL-column duplication, schema growth and the complete
+                # rollback journal before any upgrade writes. A partial old
+                # migration is repaired using its version, not column presence.
+                growth = 64 * 1024
+                for table in ("resources", "captures"):
+                    if self.db.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
+                        growth += self.db.execute("SELECT COALESCE(SUM(length(CAST(url AS BLOB))),0) FROM " + table).fetchone()[0]
+                self.transaction_budget(growth)
             self.db.executescript('''
+              BEGIN IMMEDIATE;
               CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
               CREATE TABLE IF NOT EXISTS resources(
                 url TEXT PRIMARY KEY, discovered_at TEXT NOT NULL,
@@ -158,12 +170,14 @@ class Archive(MediaCatalog):
             resource_columns = {row[1] for row in self.db.execute("PRAGMA table_info(resources)")}
             if "source_url" not in resource_columns:
                 self.db.execute("ALTER TABLE resources ADD COLUMN source_url TEXT")
-                self.db.execute("UPDATE resources SET source_url=url WHERE via!='html-media'")
+            if migrating:
+                self.db.execute("UPDATE resources SET source_url=url WHERE source_url IS NULL AND via!='html-media'")
             for name, declaration in (("source_url", "TEXT"), ("media_reference_id", "INTEGER"),
                                       ("format_version", "INTEGER NOT NULL DEFAULT 1")):
                 if name not in columns:
                     self.db.execute("ALTER TABLE captures ADD COLUMN " + name + " " + declaration)
-            self.db.execute("UPDATE captures SET source_url=url WHERE source_url IS NULL AND format_version=1")
+            if migrating:
+                self.db.execute("UPDATE captures SET source_url=url WHERE source_url IS NULL AND format_version=1")
             version = self.db.execute("SELECT value FROM meta WHERE key='format_version'").fetchone()
             if version and version[0] not in {"1", "2"}:
                 raise PolicyError("Unsupported archive catalog version")
@@ -309,6 +323,23 @@ class Archive(MediaCatalog):
     def fetch(self, client, urls=None, refresh=False, extract_media=False):
         if urls:
             self.enqueue(urls)
+        results = []
+        attempted_media = set()
+        media_first = False
+        if not urls:
+            row = self.db.execute("SELECT value FROM meta WHERE key='next_fetch_phase'").fetchone()
+            media_first = bool(row and row[0] == "media")
+            self.transaction_budget(1024)
+            with self.db:
+                self.db.execute("INSERT OR REPLACE INTO meta VALUES ('next_fetch_phase',?)",
+                                ("ordinary" if media_first else "media",))
+            if media_first:
+                results = self.fetch_media(client, self.config.max_urls)
+                if any(item["state"] == "deferred" for item in results):
+                    return results
+        remaining = self.config.max_urls - len(results)
+        if remaining <= 0:
+            return results
         query = "SELECT url,source_url,via FROM resources"
         conditions = [] if urls else ["via!='policy-media'"]
         params = []
@@ -321,15 +352,16 @@ class Archive(MediaCatalog):
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
         query += " ORDER BY CASE WHEN state='pending' THEN 0 ELSE 1 END,attempts,discovered_at,url LIMIT ?"
-        params.append(self.config.max_urls)
+        params.append(remaining)
         pending = list(self.db.execute(query, params))
-        results = []
-        attempted_media = set()
         for item in pending:
             url = item["url"]
-            reference = None
-            if url_kind(url) or item["via"] == "html-media":
-                reference = self.media_reference(url, item["source_url"], kind_hint=url_kind(url))
+            reference = self.db.execute("SELECT * FROM media_references WHERE url=? AND source_url IS ? "
+                                        "ORDER BY id DESC LIMIT 1", (url, item["source_url"])).fetchone()
+            known_media = reference or self.db.execute("SELECT * FROM media_references WHERE url=? LIMIT 1", (url,)).fetchone()
+            if reference or known_media or url_kind(url) or item["via"] in {"html-media", "policy-media"}:
+                reference = reference or self.media_reference(url, item["source_url"],
+                    kind_hint=url_kind(url) or (known_media["kind_hint"] if known_media else None))
                 attempted_media.add(reference["id"])
                 policy, reason = self.reference_admission(reference)
                 if not policy:
@@ -338,6 +370,7 @@ class Archive(MediaCatalog):
                         self.db.execute("UPDATE resources SET state='not_requested' WHERE url=?", (url,))
                     results.append({"state": "not_requested", "media_reference_id": reference["id"]})
                     continue
+                self.media_event(reference, "pending")
             self.transaction_budget(len(url.encode("utf-8")) + 1024)
             with self.db:
                 self.db.execute("UPDATE resources SET state='running',attempts=attempts+1 WHERE url=?", (url,))
@@ -374,7 +407,7 @@ class Archive(MediaCatalog):
                     if direct:
                         self.media_event(direct, "unavailable", type(exc).__name__)
                 results.append({"state": "failed", "error": type(exc).__name__})
-        if not urls and not any(r["state"] == "deferred" for r in results):
+        if not urls and not media_first and not any(r["state"] == "deferred" for r in results):
             results.extend(self.fetch_media(client, max(0, self.config.max_urls - len(results)), exclude=attempted_media))
         return results
 

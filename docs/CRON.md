@@ -62,3 +62,7 @@ Already queued links do not consume the new-candidate allowance, and individual
 feed failures are isolated, and untouched
 pending URLs are attempted before retrying failed items. Retry attempts are
 ordered fairly rather than repeatedly selecting only the oldest broken URL.
+
+Ordinary URL and media-reference priority also rotates durably between fetch
+passes. Even `max_urls=1` cannot leave one class permanently behind repeated
+failures in the other. Explicit `fetch URL` remains scoped to those URLs.

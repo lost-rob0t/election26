@@ -420,6 +420,139 @@ class MediaPolicyTests(unittest.TestCase):
             self.assertEqual(legacy["state"], "not_requested")
             self.assertEqual(archive.db.execute("SELECT value FROM meta WHERE key='format_version'").fetchone()[0], "2")
 
+    def test_explicit_fetch_keeps_opaque_policy_media_semantics(self):
+        url = "https://cdn.example/opaque"
+        response = Response(url, "text/plain", b"not an ordinary document")
+        with self.archive.writer() as archive:
+            self.seed(archive, url, kind_hint="audio")
+            archive.enqueue([url], via="policy-media", source_url="https://news.example/story")
+            result = archive.fetch(Client({url: response}), [url])
+            self.assertEqual(result[0]["state"], "not_requested")
+            self.assertEqual(response.reads, 0)
+            self.assertEqual(status(self.root)["capture_observations"], 0)
+            self.opt_in()
+            result = archive.fetch(Client({url: response}), [url])
+            self.assertEqual(result[0]["state"], "not_requested")
+            self.assertEqual(response.reads, 0)
+            self.assertEqual(archive.media_records()[0]["reason"], "unexpected_response_type")
+
+    def test_opaque_reference_keeps_media_semantics_when_manually_queued(self):
+        url = "https://cdn.example/opaque"
+        with self.archive.writer() as archive:
+            self.seed(archive, url)
+            self.config.media_policies = {"cdn.example": policy()}
+            response = Response(url, "text/plain")
+            archive.fetch(Client({url: response}), [url])
+            self.assertEqual(response.reads, 0)
+            self.assertEqual(status(self.root)["capture_observations"], 0)
+
+    def test_failed_ordinary_url_cannot_starve_pending_media(self):
+        self.opt_in()
+        self.config.max_urls = 1
+        article, media = "https://news.example/broken", "https://cdn.example/a.wav"
+        with self.archive.writer() as archive:
+            archive.enqueue([article])
+            self.seed(archive, media)
+            client = Client({article: OSError("permanent fixture failure"), media: Response(media)})
+            archive.fetch(client)
+            self.assertEqual(client.calls, [article])
+        with self.archive.writer() as archive:
+            archive.fetch(client)
+            self.assertEqual(client.calls, [article, media])
+            self.assertEqual(archive.media_records()[0]["state"], "downloaded")
+
+    def test_failed_media_cannot_starve_pending_ordinary_url(self):
+        self.opt_in()
+        self.config.max_urls = 1
+        article, media = "https://news.example/story", "https://cdn.example/a.wav"
+        with self.archive.writer() as archive:
+            self.seed(archive, media)
+            archive.fetch(Client({media: OSError("permanent fixture failure")}))
+            archive.enqueue([article])
+            client = Client({article: Response(article, "text/html"), media: OSError("permanent fixture failure")})
+            archive.fetch(client)
+            archive.fetch(client)
+            self.assertIn(article, client.calls)
+            self.assertEqual(archive.db.execute("SELECT state FROM resources WHERE url=?", (article,)).fetchone()[0], "done")
+
+    def make_v1_catalog(self, partial=False):
+        self.root.mkdir()
+        db = sqlite3.connect(self.root / "catalog.sqlite")
+        db.executescript('''
+          CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+          INSERT INTO meta VALUES ('format_version','1');
+          CREATE TABLE resources(url TEXT PRIMARY KEY,discovered_at TEXT NOT NULL,via TEXT NOT NULL,
+            state TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,error TEXT);
+          CREATE TABLE captures(id INTEGER PRIMARY KEY,url TEXT NOT NULL REFERENCES resources(url),
+            final_url TEXT NOT NULL,captured_at TEXT NOT NULL,sha256 TEXT NOT NULL,bytes INTEGER NOT NULL,
+            content_type TEXT NOT NULL,etag TEXT,last_modified TEXT,content_encoding TEXT);
+          INSERT INTO resources(url,discovered_at,via) VALUES ('https://news.example/a.wav','original-time','manual');
+          INSERT INTO resources(url,discovered_at,via) VALUES ('https://cdn.example/old.wav','original-time','html-media');
+        ''')
+        if partial:
+            db.execute("ALTER TABLE resources ADD COLUMN source_url TEXT")
+        db.commit()
+        db.close()
+
+    def test_partial_v1_column_addition_is_backfilled_on_resume(self):
+        self.make_v1_catalog(partial=True)
+        self.opt_in()
+        url = "https://news.example/a.wav"
+        with self.archive.writer() as archive:
+            rows = dict(archive.db.execute("SELECT url,source_url FROM resources"))
+            self.assertEqual(rows[url], url)
+            self.assertIsNone(rows["https://cdn.example/old.wav"])
+            archive.fetch(Client({url: Response(url)}), [url])
+            self.assertEqual(archive.media_records()[0]["state"], "downloaded")
+
+    def test_interrupted_migration_rolls_back_schema_and_version_together(self):
+        self.make_v1_catalog()
+        connect = sqlite3.connect
+        class Interrupted(sqlite3.Connection):
+            def execute(self, sql, *args, **kwargs):
+                if sql.startswith("UPDATE resources SET source_url"):
+                    raise OSError("synthetic interruption after ALTER")
+                return super().execute(sql, *args, **kwargs)
+        with patch("election26.archive.sqlite3.connect", side_effect=lambda *a, **k: connect(*a, **k, factory=Interrupted)):
+            with self.assertRaises(OSError):
+                with self.archive.writer():
+                    pass
+        db = connect(self.root / "catalog.sqlite")
+        try:
+            self.assertNotIn("source_url", {r[1] for r in db.execute("PRAGMA table_info(resources)")})
+            self.assertEqual(db.execute("SELECT value FROM meta WHERE key='format_version'").fetchone()[0], "1")
+            self.assertIsNone(db.execute("SELECT 1 FROM sqlite_master WHERE name='media_references'").fetchone())
+        finally:
+            db.close()
+        with self.archive.writer() as archive:
+            self.assertEqual(archive.db.execute("SELECT value FROM meta WHERE key='format_version'").fetchone()[0], "2")
+
+    def test_migration_reserves_disk_before_alter_or_backfill(self):
+        self.make_v1_catalog()
+        self.config.max_archive_bytes = (self.root / "catalog.sqlite").stat().st_size + 1024
+        with self.assertRaises(PolicyError):
+            with self.archive.writer():
+                pass
+        db = sqlite3.connect(self.root / "catalog.sqlite")
+        try:
+            self.assertEqual(db.execute("SELECT value FROM meta WHERE key='format_version'").fetchone()[0], "1")
+            self.assertNotIn("source_url", {r[1] for r in db.execute("PRAGMA table_info(resources)")})
+        finally:
+            db.close()
+
+    def test_policy_change_is_pending_when_budget_defers_request(self):
+        url = "https://cdn.example/a.wav"
+        with self.archive.writer() as archive:
+            self.seed(archive, url)
+            original = (self.root / "manifests/media-1.json").read_bytes()
+            self.opt_in()
+            result = archive.fetch(Client({url: BudgetError("synthetic exhausted pass")}))
+            self.assertEqual(result[0]["state"], "deferred")
+            record = archive.media_records()[0]
+            self.assertEqual(record["state"], "pending")
+            self.assertEqual(record["source_policy"], self.config.media_policies["news.example"])
+            self.assertEqual((self.root / "manifests/media-1.json").read_bytes(), original)
+
 
 if __name__ == "__main__":
     unittest.main()

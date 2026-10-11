@@ -73,6 +73,8 @@ class MediaCatalog:
         source_url = canonical_url(source_url) if source_url else None
         if content_type is not None and (not isinstance(content_type, str) or len(content_type.encode()) > 1024):
             raise PolicyError("Media type metadata exceeds the per-field limit")
+        if kind_hint is not None and kind_hint not in SUFFIXES:
+            raise PolicyError("Invalid media kind hint")
         if advertised_bytes is not None and (type(advertised_bytes) is not int or advertised_bytes < 0):
             raise PolicyError("Invalid advertised media length")
         # Direct URLs have no parent; repeat attempts reuse their reference.
@@ -206,6 +208,7 @@ class MediaCatalog:
             if len(results) >= limit:
                 break
             try:
+                self.media_event(reference, "pending")
                 self.enqueue([reference["url"]], via="policy-media", source_url=reference["source_url"])
                 with client.open(reference["url"]) as response:
                     record = self.capture(reference["url"], response, source_url=reference["source_url"], reference=reference)

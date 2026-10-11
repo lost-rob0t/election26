@@ -98,7 +98,8 @@ include source URL, parent capture ID, discovery/observation times, declared
 metadata, response metadata when available, policy snapshot, and capture/hash
 joins after a successful download. Source capture time and Last-Modified remain
 unchanged. Existing capture sidecars/originals are never overwritten by migration.
-Version-1 catalogs migrate additively; unattributed legacy `html-media` queue
+Version-1 catalogs migrate additively in a restart-safe transaction after reserving
+journal/schema/URL-backfill space; unattributed legacy `html-media` queue
 entries fail closed until an operator identifies their source. Existing archived
 media remains accessible regardless of current acquisition policy.
 
