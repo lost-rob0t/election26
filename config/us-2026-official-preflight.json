@@ -1,0 +1,18 @@
+{
+  "country": "US",
+  "year": 2026,
+  "date_from": "2026-01-01",
+  "date_to": "2026-12-31",
+  "allowed_hosts": ["www.fec.gov"],
+  "manual_urls": [
+    "https://www.fec.gov/resources/cms-content/documents/2026pdates.pdf",
+    "https://www.fec.gov/help-candidates-and-committees/dates-and-deadlines/"
+  ],
+  "feeds": [],
+  "max_urls": 2,
+  "max_file_bytes": 1048576,
+  "max_archive_bytes": 10485760,
+  "min_free_bytes": 67108864,
+  "brave_enabled": false,
+  "discord_enabled": false
+}

@@ -1,0 +1,22 @@
+{
+  "country": "US",
+  "year": 2026,
+  "date_from": "2026-01-01",
+  "date_to": "2026-12-31",
+  "allowed_hosts": [],
+  "manual_urls": [],
+  "feeds": [],
+  "max_file_bytes": 268435456,
+  "max_archive_bytes": 10737418240,
+  "min_free_bytes": 1073741824,
+  "max_urls": 100,
+  "max_requests": 200,
+  "max_run_seconds": 300,
+  "request_delay_seconds": 1.0,
+  "brave_enabled": false,
+  "brave_credential": "env:BRAVE_SEARCH_API_KEY",
+  "discord_enabled": false,
+  "discord_credential": "env:ELECTION26_DISCORD_WEBHOOK",
+  "discord_interval_seconds": 900,
+  "retention_days": 90
+}
