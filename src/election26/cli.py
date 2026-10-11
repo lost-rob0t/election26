@@ -25,6 +25,11 @@ def parser():
     fetch.add_argument("urls", nargs="*")
     fetch.add_argument("--refresh", action="store_true", help="Capture new observations, retaining prior versions")
     fetch.add_argument("--extract-media", action="store_true", help="Compatibility flag; never overrides source media policy")
+    browser = commands.add_parser("browser", help="Opt-in isolated Linux capture of one explicit public URL")
+    browser.add_argument("url")
+    browser.add_argument("--runtime", required=True, help="Dedicated public renderer runtime from build-browser-runtime.py")
+    browser.add_argument("--seconds", type=int, default=45)
+    browser.add_argument("--requests", type=int, default=40)
     normal = commands.add_parser("normalize", help="Optional canonical StarIntel HTTP metadata only")
     normal.add_argument("capture_id", type=int)
     commands.add_parser("media", help="Replay latest media outcomes and verify downloaded originals locally")
@@ -49,6 +54,10 @@ def main(argv=None):
         config = Config.load(args.config)
         if args.command == "status":
             result = status(args.archive)
+        elif args.command == "browser":
+            from .browser import BrowserLimits, capture_browser
+            result = capture_browser(args.archive, config, args.url, args.runtime,
+                                     BrowserLimits(seconds=args.seconds, requests=args.requests))
         else:
             with Archive(args.archive, config).writer() as archive:
                 client = PublicHTTP(config)
@@ -83,6 +92,8 @@ def main(argv=None):
                     from .reporting import publish
                     result = publish(archive, client, args.send)
         print(json.dumps(result, indent=2, sort_keys=True))
+        if args.command == "browser" and result.get("state") != "complete":
+            return 1
         items = result if isinstance(result, list) else result.get("fetch", [])
         discovery_result = result.get("discovery", {}) if isinstance(result, dict) else {}
         if any(item.get("state") == "failed" for item in items) or discovery_result.get("errors") or (isinstance(result, dict) and result.get("errors")):

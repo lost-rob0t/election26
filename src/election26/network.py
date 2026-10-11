@@ -12,6 +12,12 @@ from urllib.robotparser import RobotFileParser
 from .config import PolicyError, BudgetError, canonical_url
 
 
+class HTTPStatusError(PolicyError):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+
+
 def public_address(host, port):
     addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     if not addresses:
@@ -70,7 +76,12 @@ class Response:
         self.deadline = deadline
         self.url = url
         self.status = response.status
-        self.headers = {k.lower(): v for k, v in response.getheaders()}
+        raw_headers = response.getheaders()
+        self.headers = {k.lower(): v for k, v in raw_headers}
+        # Multiple enforcing CSP fields are an intersection, not last-wins.
+        policies = [value for name, value in raw_headers if name.lower() == 'content-security-policy']
+        if policies:
+            self.headers['content-security-policy'] = ', '.join(policies)
 
     def chunks(self):
         total = 0
@@ -111,8 +122,9 @@ class Response:
 
 
 class PublicHTTP:
-    def __init__(self, config):
+    def __init__(self, config, *, reject_redirects=False):
         self.config = config
+        self.reject_redirects = reject_redirects
         self.robots = {}
         self.last_request = {}
         self.request_count = 0
@@ -162,6 +174,8 @@ class PublicHTTP:
                 if response.status in (301, 302, 303, 307, 308):
                     location = response.headers.get("location")
                     response.__exit__()
+                    if self.reject_redirects:
+                        raise HTTPStatusError(response.status, "Browser redirects are not supported")
                     if not location or method != "GET" or headers:
                         raise PolicyError("Provider redirects and missing redirect targets are blocked")
                     url = urljoin(url, location)
@@ -206,7 +220,7 @@ class PublicHTTP:
                 raise PolicyError("Source robots policy disallows this URL")
         with self.request(url, before_request=require_robots) as response:
             if response.status != 200:
-                raise PolicyError("Source did not return HTTP 200")
+                raise HTTPStatusError(response.status, "Source did not return HTTP 200")
             length = response.headers.get("content-length")
             if length and int(length) > self.config.max_file_bytes:
                 raise PolicyError("Source exceeds per-file size limit")
