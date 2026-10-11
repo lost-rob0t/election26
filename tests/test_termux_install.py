@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -17,7 +18,9 @@ class TermuxInstallerTests(unittest.TestCase):
         result = subprocess.run(["bash", str(ROOT / "scripts/install-termux.sh"), "--with-yt-dlp"], text=True, capture_output=True, check=True)
         self.assertIn("Preview only", result.stdout)
         self.assertIn("python-yt-dlp", result.stdout)
-        self.assertNotIn("Official Termux packages: python python-pip python-yt-dlp cronie", result.stdout)
+        self.assertIn("python-ensurepip-wheels", result.stdout)
+        plan = next(line for line in result.stdout.splitlines() if line.startswith("Official Termux packages:")).split(":", 1)[1].split()
+        self.assertEqual(plan, ["python", "python-pip", "python-ensurepip-wheels", "python-yt-dlp"])
 
     def test_existing_config_is_preserved_and_private(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -56,3 +59,11 @@ class TermuxInstallerTests(unittest.TestCase):
             "--archive", "/private/archive", "--log", "/private/run.log"],
             text=True, capture_output=True, check=True)
         self.assertNotIn("--extract-media", result.stdout)
+
+    def test_install_refuses_nonstandard_home_before_any_mutation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(["bash", str(ROOT / "scripts/install-termux.sh"), "--install"],
+                env={**os.environ, "HOME": tmp, "PREFIX": tmp}, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("standard Termux Android app", result.stderr)
+            self.assertEqual(list(Path(tmp).iterdir()), [])

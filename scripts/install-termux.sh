@@ -21,7 +21,7 @@ done
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 prefix=${PREFIX:-/data/data/com.termux/files/usr}
 home=${HOME:?HOME must be set}
-packages=(python python-pip)
+packages=(python python-pip python-ensurepip-wheels)
 $with_ytdlp && packages+=(python-yt-dlp)
 $with_ffmpeg && packages+=(ffmpeg)
 $with_cron && packages+=(cronie)
