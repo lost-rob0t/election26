@@ -255,6 +255,46 @@ class ArchiveKitTests(unittest.TestCase):
             self.assertEqual(kit.run_batch(archive, client, self.report), 1)
             self.assertIn("https://news.example/feed1", client.calls)
 
+    def test_response_policy_refusal_does_not_hold_rotation_forever(self):
+        self.config.feeds = []
+        self.config.manual_urls = ["https://news.example/page"]
+        self.config.allowed_hosts.append("media.example")
+        self.config.max_urls = 1
+        self.config.media_policies = {"news.example": {"download": True, "types": ["image"],
+            "max_file_bytes": 1000, "max_total_bytes": 10000, "min_free_bytes": 0}}
+        class MismatchedHTTP(FixtureHTTP):
+            def open(self, url):
+                response = super().open(url)
+                if url.endswith(".jpg"):
+                    response = Response(b"must never read", url, "application/pdf")
+                    response.chunks = lambda: self.fail("Rejected media body was read")
+                return response
+        with Archive(self.cwd / "archive", self.config).writer() as archive:
+            self.assertEqual(kit.run_batch(archive, MismatchedHTTP(self.config), self.report), 75)
+            for _ in range(2):
+                self.assertEqual(kit.run_batch(archive, MismatchedHTTP(self.config), self.report), 1)
+                self.assertTrue(self.events[-1]["rotation_complete"])
+                self.assertEqual(self.events[-1]["pending_media"], 0)
+                self.assertEqual(self.events[-1]["blocked_media"], 1)
+            self.assertEqual(status(archive.root)["capture_observations"], 1)
+
+    def test_later_media_opt_in_admits_previously_link_only_reference(self):
+        self.config.feeds = []
+        self.config.manual_urls = ["https://news.example/page"]
+        self.config.allowed_hosts.append("media.example")
+        self.config.max_urls = 1
+        class ImageHTTP(FixtureHTTP):
+            def open(self, url):
+                response = super().open(url)
+                return Response(b"synthetic image", url, "image/jpeg") if url.endswith(".jpg") else response
+        with Archive(self.cwd / "archive", self.config).writer() as archive:
+            self.assertEqual(kit.run_batch(archive, ImageHTTP(self.config), self.report), 0)
+            self.config.media_policies = {"news.example": {"download": True, "types": ["image"],
+                "max_file_bytes": 1000, "max_total_bytes": 10000, "min_free_bytes": 0}}
+            self.assertEqual(kit.unfinished_media(archive), (1, 0, 0))
+            self.assertEqual(kit.run_batch(archive, ImageHTTP(self.config), self.report), 0)
+            self.assertEqual(archive.db.execute("SELECT COUNT(*) FROM captures WHERE media_reference_id IS NOT NULL").fetchone()[0], 1)
+
     def test_supervisor_signals_owned_group_before_reaping(self):
         import types
         event = types.SimpleNamespace(si_status=0, si_code=os.CLD_EXITED)

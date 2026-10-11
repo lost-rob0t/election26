@@ -104,22 +104,36 @@ def save_state(archive, state):
 
 def unfinished_media(archive):
     """Count admitted work not necessarily present in the ordinary URL queue."""
-    pending = failed = 0
+    from types import SimpleNamespace
+    pending = failed = blocked = 0
     if not any(policy.get("download") for policy in archive.config.media_policies.values()):
-        return pending, failed
+        return pending, failed, blocked
     for reference in archive.db.execute("SELECT * FROM media_references ORDER BY id"):
         previous = archive.db.execute("SELECT payload FROM media_observations WHERE reference_id=? ORDER BY id DESC LIMIT 1",
                                       (reference["id"],)).fetchone()
-        outcome = json.loads(previous[0])["state"] if previous else None
+        record = json.loads(previous[0]) if previous else {}
+        outcome = record.get("state")
         if outcome == "downloaded":
             continue
         policy, _ = archive.reference_admission(reference)
         if policy:
+            if outcome == "not_requested" and "response_type" in record:
+                # Replay known response metadata with the same core admission.
+                # A rejected MIME/size/redirect is not an unattempted body; do not
+                # let its pre-response URL hint hold the source cycle forever.
+                headers = {"content-type": record["response_type"]}
+                if record.get("response_bytes") is not None:
+                    headers["content-length"] = str(record["response_bytes"])
+                response = SimpleNamespace(url=record["final_url"], headers=headers)
+                permitted, _ = archive.reference_admission(reference, response)
+                if not permitted:
+                    blocked += 1
+                    continue
             if outcome == "unavailable":
                 failed += 1
             else:
                 pending += 1
-    return pending, failed
+    return pending, failed, blocked
 
 
 def run_batch(archive, client, report=emit):
@@ -167,9 +181,9 @@ def run_batch(archive, client, report=emit):
     # is also outside the ordinary fetch queue this kit can drain.
     pending = archive.db.execute("SELECT COUNT(*) FROM resources WHERE state IN ('pending','running') "
                                  "AND via NOT IN ('policy-media','browser')").fetchone()[0]
-    pending_media, failed_media = unfinished_media(archive)
+    pending_media, failed_media, blocked_media = unfinished_media(archive)
     deferred = deferred or bool(pending or pending_media) or any(item["state"] == "deferred" for item in fetched)
-    failures = state["source_errors"] + summary["errors"] + failed_media + sum(item["state"] == "failed" for item in fetched)
+    failures = state["source_errors"] + summary["errors"] + failed_media + blocked_media + sum(item["state"] == "failed" for item in fetched)
     # A failed source is an attempted rotation, not a successful archive. Permit a
     # fresh discovery cycle next time once this cycle's pending queue is drained.
     state["complete"] = state["manual_done"] and state["feeds_left"] == 0 and not deferred
@@ -178,7 +192,7 @@ def run_batch(archive, client, report=emit):
     report("batch_finished", exit_code=code, rotation_complete=state["complete"],
            source_errors=state["source_errors"], requests=client.request_count,
            source_deferred=state["source_deferred"],
-           pending_media=pending_media, failed_media=failed_media,
+           pending_media=pending_media, failed_media=failed_media, blocked_media=blocked_media,
            feeds_left=state["feeds_left"], status=summary)
     return code
 
