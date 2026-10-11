@@ -33,6 +33,21 @@ def sync_dir(path):
         os.close(fd)
 
 
+def durable_mkdir(path):
+    """Persist every newly created ancestor before any checkpoint can commit."""
+    missing = []
+    cursor = Path(path)
+    while not cursor.exists():
+        missing.append(cursor)
+        cursor = cursor.parent
+    for directory in reversed(missing):
+        directory.mkdir(mode=0o700, exist_ok=True)
+        if directory.is_symlink() or not directory.is_dir():
+            raise PolicyError("Archive directory creation encountered an unsafe path")
+        sync_dir(directory)
+        sync_dir(directory.parent)
+
+
 def atomic_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,7 +99,7 @@ class Archive:
     def writer(self):
         if self.db is not None:
             raise PolicyError("Archive writer is already active")
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        durable_mkdir(self.root)
         allowed_names = {".writer.lock", "catalog.sqlite", "catalog.sqlite-journal", "objects", "tmp", "transcripts", "manifests", "canonical", "backup.json"}
         if any(p.name not in allowed_names or p.is_symlink() for p in self.root.iterdir()):
             raise PolicyError("Archive directory contains unrecognized files or symlinks")

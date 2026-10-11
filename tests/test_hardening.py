@@ -150,3 +150,17 @@ class HardeningTests(unittest.TestCase):
                 self.assertRaises(PolicyError, normalize, archive, 1)
             self.assertTrue(archive.object_path(digest).exists())
             self.assertEqual(status(self.root)["capture_observations"], 1)
+
+
+    def test_multilevel_archive_creation_syncs_every_new_ancestor(self):
+        root = Path(self.tmp.name) / "new-parent" / "nested" / "archive"
+        seen = []
+        def sync(path):
+            seen.append(path)
+            sync_dir(path)
+        with patch("election26.archive.sync_dir", side_effect=sync):
+            with Archive(root, self.config).writer():
+                pass
+        for directory in [Path(self.tmp.name), root.parent.parent, root.parent, root]:
+            self.assertIn(directory, seen)
+        self.assertLess(seen.index(Path(self.tmp.name)), seen.index(root))
