@@ -1,0 +1,46 @@
+name: Nix packages and offline startup
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  nix-x86_64-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install pinned public Nix installer
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # verified v31 tag target
+        with:
+          enable_kvm: false
+          set_as_trusted_user: false
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            sandbox = true
+      - name: Bootstrap immutable input lock for review
+        # Temporary bootstrap gate: commit the emitted real lock and replace
+        # this step with a mandatory read-only lock check before merging.
+        run: |
+          nix flake lock
+          cat flake.lock
+          test -f flake.lock
+          git add --intent-to-add flake.lock
+      - name: Build every package and run offline checks
+        run: |
+          nix flake check --no-write-lock-file --print-build-logs
+          nix build --no-write-lock-file --print-build-logs --no-link \
+            .#election26 .#election26-starintel .#election26-keyring \
+            .#election26-whisper .#election26-full .#cron .#fec-target \
+            .#starintel-doc .#keyring .#whisper .#yt-dlp .#ffmpeg .#media-tools
+      - name: Check development shells and app entrypoints
+        run: |
+          nix develop --no-write-lock-file --command python -c 'import election26'
+          nix develop .#full --no-write-lock-file --command python -c 'import election26, starintel_doc, keyring, whisper'
+          nix run --no-write-lock-file .#election26 -- --help
+          nix run --no-write-lock-file .#cron -- --help
+          nix run --no-write-lock-file .#fec-target -- --help
