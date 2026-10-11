@@ -156,14 +156,21 @@ class ArchiveKitTests(unittest.TestCase):
             # with synthetic stat metadata instead of skipping the safety check.
             catalog.write_text("synthetic catalog")
             real_stat = Path.stat
-            def linked_stat(path, *args, **kwargs):
-                value = real_stat(path, *args, **kwargs)
+            real_lstat = Path.lstat
+            def linked_value(path, value):
                 if path == catalog:
                     fields = list(value)
                     fields[3] = 2  # st_nlink
                     return os.stat_result(fields)
                 return value
-            with patch.object(Path, "stat", linked_stat):
+            def linked_stat(path, *args, **kwargs):
+                return linked_value(path, real_stat(path, *args, **kwargs))
+            def linked_lstat(path, *args, **kwargs):
+                return linked_value(path, real_lstat(path, *args, **kwargs))
+            # Python 3.14 lstat need not delegate to Path.stat. Patch the exact
+            # boundary read by the guard, and prove the fixture took effect.
+            with patch.object(Path, "stat", linked_stat), patch.object(Path, "lstat", linked_lstat):
+                self.assertEqual(catalog.lstat().st_nlink, 2)
                 self.assertRaises(PolicyError, kit.paths, self.cwd, self.home)
         catalog.unlink()
         self.assertEqual(secret.read_text(), "leave alone")
@@ -181,6 +188,22 @@ class ArchiveKitTests(unittest.TestCase):
         self.assertRaises(PolicyError, kit.prepare, self.cwd, self.home, ROOT)
         self.assertEqual(sentinel.read_text(), "preserve")
         self.assertEqual(json.loads(config.read_text())["max_requests"], 3)
+
+    def test_hardlink_guard_uses_direct_lstat_metadata_on_every_platform(self):
+        archive = self.cwd / "archive"
+        archive.mkdir(mode=0o700)
+        catalog = archive / "catalog.sqlite"
+        catalog.write_text("synthetic catalog")
+        def direct_lstat(path):
+            value = os.lstat(path)  # Deliberately bypass Path.stat, as Python 3.14 can.
+            if path == catalog:
+                fields = list(value)
+                fields[3] = 2
+                return os.stat_result(fields)
+            return value
+        with patch.object(Path, "lstat", direct_lstat):
+            self.assertEqual(catalog.lstat().st_nlink, 2)
+            self.assertRaises(PolicyError, kit.paths, self.cwd, self.home)
 
     def test_default_never_calls_brave_even_when_key_and_config_are_enabled(self):
         self.config.brave_enabled = True
