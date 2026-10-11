@@ -1,7 +1,7 @@
 name: Android Termux fixture verification
 on:
   push:
-    branches: [main, feat/termux-install-android-ci]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:

@@ -2,6 +2,7 @@
 # Fresh disposable emulator only. No user phone or credentials are used.
 set -euo pipefail
 [[ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" == 1 ]] || { echo 'Expected an emulator'; exit 2; }
+[[ -z "$(adb shell pm path com.termux | tr -d '\r')" ]] || { echo 'Expected a fresh emulator without Termux'; exit 2; }
 version=v0.118.3
 asset="termux-app_${version}+github-debug_x86_64.apk"
 base="https://github.com/termux/termux-app/releases/download/$version"
@@ -19,17 +20,19 @@ print('Official Termux APK SHA256:', actual)
 PY
 adb install "$work/$asset"
 adb shell am start -n com.termux/.app.TermuxActivity
+# Pinned TermuxInstaller.java emits this only AFTER successful second stage.
+# bash/HOME presence alone is insufficient and could race bootstrap package work.
 ready=false
 for attempt in $(seq 1 120); do
-  if adb shell run-as com.termux test -x /data/data/com.termux/files/usr/bin/bash; then ready=true; break; fi
+  if adb logcat -d -s 'Termux:TermuxInstaller:I' '*:S' | grep -F 'Bootstrap packages installed successfully.' >/dev/null &&
+     adb shell run-as com.termux test -x /data/data/com.termux/files/usr/bin/bash &&
+     adb shell run-as com.termux test -d /data/data/com.termux/files/home; then
+    ready=true
+    break
+  fi
   sleep 2
 done
-$ready || { echo 'Termux bootstrap did not complete within 240s'; exit 1; }
-# Wait for the extraction completion marker as well, not just the first binary.
-for attempt in $(seq 1 30); do
-  if adb shell run-as com.termux test -d /data/data/com.termux/files/home; then break; fi
-  sleep 2
-done
+$ready || { echo 'Termux did not confirm completed bootstrap within 240s'; exit 1; }
 adb shell run-as com.termux mkdir -p /data/data/com.termux/files/home/election26-ci
 # Only committed public source enters the emulator, no Git credential/config files.
 git archive HEAD | adb shell -T run-as com.termux /system/bin/tar -xf - -C /data/data/com.termux/files/home/election26-ci
