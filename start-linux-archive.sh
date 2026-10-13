@@ -39,4 +39,4 @@ export PYTHONSAFEPATH=1
 export PYTHONNOUSERSITE=1
 export PYTHONDONTWRITEBYTECODE=1
 python3 -P -s -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else "Python 3.11+ is required")'
-exec python3 -P -s -m election26.kit --source "$root" "$@"
+exec python3 -I "$root/scripts/linux-runtime.py" "$@"

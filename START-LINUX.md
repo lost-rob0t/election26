@@ -20,7 +20,7 @@ bash ./start-linux-archive.sh
 The third command resumes another bounded pass. Ctrl-C stops the foreground run;
 committed raw bytes, provenance and checkpoints remain. Run from the same directory
 to resume the same archive. There is no activation, pip install, background service
-or cron installation. On Arch, if Python is missing, install it yourself with
+or cron installation. A private temporary copy of package code under HOME keeps\narchive data outside the running source tree and is cleaned after each run. On Arch, if Python is missing, install it yourself with
 `sudo pacman -S python`. The launcher never runs a package manager.
 
 For the pinned Nix runtime on x86_64 Linux, with Nix already installed:

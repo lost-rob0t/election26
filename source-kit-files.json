@@ -42,6 +42,7 @@
   "scripts/ci-termux-host.sh",
   "scripts/cron.py",
   "scripts/install-termux.sh",
+  "scripts/linux-runtime.py",
   "scripts/termux_setup.py",
   "source-kit-files.json",
   "src/election26/__init__.py",

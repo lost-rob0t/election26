@@ -65,7 +65,7 @@ from test_archive_kit import FixtureHTTP
 from election26 import kit
 from election26.archive import Archive, status
 os.umask(0o077)
-target = Path.cwd() / "synthetic acquisition"
+target = Path.cwd().parent / "synthetic acquisition"
 target.mkdir(mode=0o700)
 config = target / "archive-config.json"
 config.write_text(json.dumps({"allowed_hosts": ["news.example"], "min_free_bytes": 0,
