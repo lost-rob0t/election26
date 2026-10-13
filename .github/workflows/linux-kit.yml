@@ -1,0 +1,56 @@
+name: Desktop Linux ZIP
+on:
+  push:
+    branches: [main, 'feat/linux-archive-kit-*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  extracted-kit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        runtime: [python, nix]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
+        if: matrix.runtime == 'nix'
+        with:
+          enable_kvm: false
+          set_as_trusted_user: false
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            sandbox = true
+      - name: Build twice from exact head and compare bytes
+        run: |
+          python scripts/check-public-tree.py
+          python scripts/build-source-kit.py --platform linux --commit "$(git rev-parse HEAD)" --output "$RUNNER_TEMP/election26-linux-archive-kit.zip"
+          python scripts/build-source-kit.py --platform linux --commit "$(git rev-parse HEAD)" --output "$RUNNER_TEMP/reproduced.zip"
+          cmp "$RUNNER_TEMP/election26-linux-archive-kit.zip" "$RUNNER_TEMP/reproduced.zip"
+      - name: Extracted Linux start, resume and status (synthetic only)
+        env:
+          RUNTIME: ${{ matrix.runtime }}
+        run: |
+          if [ "$RUNTIME" = nix ]; then
+            python scripts/ci-linux-kit-fixture.py --nix --zip "$RUNNER_TEMP/election26-linux-archive-kit.zip"
+          else
+            python scripts/ci-linux-kit-fixture.py --zip "$RUNNER_TEMP/election26-linux-archive-kit.zip"
+          fi
+      - name: Upload reproducible ZIP and checksum
+        if: matrix.runtime == 'python'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: election26-linux-archive-kit
+          path: |
+            ${{ runner.temp }}/election26-linux-archive-kit.zip
+            ${{ runner.temp }}/election26-linux-archive-kit.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
