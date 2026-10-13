@@ -14,7 +14,9 @@ guard = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(guard)
 
 
-def build(root, output, commit):
+def build(root, output, commit, platform="termux"):
+    if platform not in ("termux", "linux"):
+        raise ValueError("Unknown kit platform")
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("Provide the exact reviewed 40-character source commit")
     root, output = Path(root).resolve(), Path(output).expanduser()
@@ -43,15 +45,16 @@ def build(root, output, commit):
     files["SOURCE-PROVENANCE.json"] = (json.dumps({
         "repository": "https://github.com/lost-rob0t/election26", "source_commit": commit,
         "content": "Public code, docs, reference URLs, metadata-only source probes and synthetic tests. No collected archive.",
-        "command_after_extraction": "bash ./start-archive.sh",
-        "dependencies": "Termux Android; official Termux Python packages and initial Python build dependencies require internet.",
+        "command_after_extraction": "bash ./start-linux-archive.sh" if platform == "linux" else "bash ./start-archive.sh",
+        "dependencies": ("Desktop Linux, Bash and Python 3.11+ standard library; optional pinned Nix Python runtime requires initial internet."
+                         if platform == "linux" else "Termux Android; official Termux Python packages and initial Python build dependencies require internet."),
     }, indent=2) + "\n").encode()
     files["SHA256SUMS"] = "".join(hashlib.sha256(data).hexdigest() + "  " + name + "\n"
                                     for name, data in sorted(files.items())).encode()
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
         for name, data in sorted(files.items()):
-            info = zipfile.ZipInfo("election26-termux-archive-kit/" + name, (2026, 10, 11, 0, 0, 0))
+            info = zipfile.ZipInfo("election26-" + platform + "-archive-kit/" + name, (2026, 10, 11, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o100644 << 16
             bundle.writestr(info, data)
@@ -65,5 +68,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True)
     parser.add_argument("--commit", required=True)
+    parser.add_argument("--platform", choices=("termux", "linux"), default="termux")
     args = parser.parse_args()
-    print(json.dumps(build(ROOT, args.output, args.commit), sort_keys=True))
+    print(json.dumps(build(ROOT, args.output, args.commit, args.platform), sort_keys=True))
